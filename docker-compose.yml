@@ -1,0 +1,140 @@
+version: '3.8'
+
+services:
+  # SCMS Components
+  root-ca:
+    build: .
+    command: python scms/root_ca.py
+    volumes:
+      - ./scms:/app/scms
+      - ./data/certs:/app/data/certs
+    ports:
+      - "5001:5001"
+
+  intermediate-ca:
+    build: .
+    command: python scms/intermediate_ca.py
+    volumes:
+      - ./scms:/app/scms
+    depends_on:
+      - root-ca
+    environment:
+      - ROOT_CA_URL=http://root-ca:5001
+
+  pca:
+    build: .
+    command: python scms/pca.py
+    volumes:
+      - ./scms:/app/scms
+    depends_on:
+      - intermediate-ca
+      - linkage-auth-1
+      - linkage-auth-2
+    environment:
+      - ICA_URL=http://intermediate-ca:5002
+
+  linkage-auth-1:
+    build: .
+    command: python scms/linkage_auth.py --id 1
+    volumes:
+      - ./scms:/app/scms
+    ports:
+      - "6001:6001"
+
+  linkage-auth-2:
+    build: .
+    command: python scms/linkage_auth_2.py --id 2
+    volumes:
+      - ./scms:/app/scms
+    ports:
+      - "6002:6002"
+
+  ra:
+    build: .
+    command: python scms/registration_authority.py
+    volumes:
+      - ./scms:/app/scms
+    depends_on:
+      - pca
+      - intermediate-ca
+      - linkage-auth-1
+      - linkage-auth-2
+    ports:
+      - "5003:5003"
+
+  ma:
+    build: .
+    command: python scms/misbehavior_authority.py
+    volumes:
+      - ./scms:/app/scms
+      - ./data/crl:/app/data/crl
+    depends_on:
+      - ra
+      - pca
+    ports:
+      - "5004:5004"
+
+  # Vehicle and Infrastructure Nodes
+  vehicle-1:
+    build: .
+    command: python vehicles/vehicle.py --id 1
+    volumes:
+      - ./vehicles:/app/vehicles
+      - ./data/vehicles:/app/data/vehicles
+    depends_on:
+      - ra
+      - ma
+    environment:
+      - RA_URL=http://ra:5003
+      - MA_URL=http://ma:5004
+
+  vehicle-2:
+    build: .
+    command: python vehicles/vehicle.py --id 2
+    volumes:
+      - ./vehicles:/app/vehicles
+      - ./data/vehicles:/app/data/vehicles
+    depends_on:
+      - ra
+      - ma
+
+  rse-1:
+    build: .
+    command: python infrastructure/rse.py --id 1
+    volumes:
+      - ./infrastructure:/app/infrastructure
+    depends_on:
+      - ra
+      - ma
+
+  # Database
+  postgres:
+    image: postgres:14
+    environment:
+      - POSTGRES_PASSWORD=v2xsecurity
+      - POSTGRES_DB=v2x_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # Web Dashboard
+  dashboard:
+    build: .
+    command: python dashboard/app.py
+    volumes:
+      - ./dashboard:/app/dashboard
+    ports:
+      - "8080:8080"
+    depends_on:
+      - vehicle-1
+      - vehicle-2
+      - rse-1
+
+volumes:
+  postgres_data:

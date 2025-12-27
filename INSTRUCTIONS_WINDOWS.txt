@@ -1,0 +1,60 @@
+====================================================
+V2X SECURITY ARCHITECTURE - WINDOWS IMPLEMENTATION
+====================================================
+
+PREREQUISITES:
+1. Windows 10/11 with WSL 2 enabled
+2. Docker Desktop for Windows
+3. Python 3.9+ installed
+
+INSTALLATION STEPS:
+
+1. EXTRACT FILES
+   - Extract all files to: C:\V2X-Security-Architecture
+
+2. START DOCKER
+   - Open Docker Desktop
+   - Wait for Docker to start (green icon in system tray)
+
+3. RUN THE ARCHITECTURE
+   - Open Command Prompt as Administrator
+   - Navigate to the project folder:
+        cd C:\V2X-Security-Architecture
+   
+   - Run the setup script:
+        run-v2x.bat
+
+4. ACCESS SERVICES:
+   - Dashboard:        http://localhost:8080
+   - Root CA:          http://localhost:5001/health
+   - Vehicle 1 Log:    vehicle_1.log
+   - Vehicle 2 Log:    vehicle_2.log
+
+5. TEST THE SYSTEM:
+   - Run test script:
+        python test_v2x.py
+
+ARCHITECTURE IMPLEMENTED:
+
+✓ CAM Messages: ECDSA P-256 (Classical Cryptography)
+✓ DENM Messages: CRYSTALS-Dilithium2 Simulation (PQC)
+✓ SCMS Components:
+   - Root Certificate Authority (RCA)
+   - Pseudonym Certificate Authority (PCA)
+   - Linkage Authorities (LA1, LA2)
+   - Registration Authority (RA)
+   - Misbehavior Authority (MA)
+
+DEMONSTRATION FOR PROFESSOR:
+
+1. Show Dashboard with live messages
+2. Demonstrate CAM messages (Classical Crypto)
+3. Demonstrate DENM messages (PQC Simulation)
+4. Show SCMS certificate chain
+5. Explain how linkage values provide privacy
+
+TROUBLESHOOTING:
+
+- If Docker fails: Restart Docker Desktop
+- If ports busy: Change ports in docker-compose.yml
+- For logs: Check vehicle_1.log and vehicle_2.log
