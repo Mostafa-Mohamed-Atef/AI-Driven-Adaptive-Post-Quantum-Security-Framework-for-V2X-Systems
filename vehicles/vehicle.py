@@ -1,4 +1,4 @@
-import json
+﻿import json
 import logging
 import time
 import hashlib
@@ -100,16 +100,30 @@ class Vehicle:
         })
     
     def broadcast_message(self, message):
-        """Broadcast message (Windows compatible)"""
+        """Broadcast message (Windows compatible) AND send to dashboard"""
         try:
+            # Original broadcast
             self.udp_socket.sendto(
                 message.encode(),
                 (BROADCAST_ADDR, self.broadcast_port)
             )
-            logging.info(f"Vehicle {self.vehicle_id} broadcast: {message[:50]}...")
+            
+            # NEW: Also send to dashboard
+            import socket
+            dashboard_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            dashboard_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if sys.platform == 'win32':
+                dashboard_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            
+            dashboard_socket.sendto(
+                message.encode(),
+                ('172.18.0.4', 5008)  # Dashboard IP and port\n
+            )
+            dashboard_socket.close()
+            
+            logging.info(f"Vehicle {self.vehicle_id} broadcast to dashboard on port 5008: {message[:50]}...")
         except Exception as e:
             logging.error(f"Broadcast error: {e}")
-    
     def start_listening(self):
         """Start listening thread"""
         self.listening = True

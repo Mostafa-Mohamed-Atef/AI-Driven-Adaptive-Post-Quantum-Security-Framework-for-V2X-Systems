@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, jsonify
+﻿from flask import Flask, render_template_string, jsonify
 import json
 import threading
 import socket
@@ -27,7 +27,7 @@ HTML_TEMPLATE = """
 <body>
     <h1>V2X Security Architecture Dashboard</h1>
     <p><strong>Platform:</strong> {{ platform }} | <strong>CAM Crypto:</strong> ECDSA | <strong>DENM Crypto:</strong> PQC Simulation</p>
-    
+
     <div class="container">
         <div class="panel crypto">
             <h3>Cryptography Status</h3>
@@ -35,7 +35,7 @@ HTML_TEMPLATE = """
             <p><strong>Post-Quantum (DENM):</strong> CRYSTALS-Dilithium2 Simulation</p>
             <p><strong>SCMS Status:</strong> {{ scms_status }}</p>
         </div>
-        
+
         <div class="panel messages">
             <h3>Recent Messages</h3>
             {% for msg in messages[-10:] %}
@@ -44,7 +44,7 @@ HTML_TEMPLATE = """
             </div>
             {% endfor %}
         </div>
-        
+
         <div class="panel nodes">
             <h3>Active Nodes</h3>
             {% for node in nodes %}
@@ -52,7 +52,7 @@ HTML_TEMPLATE = """
             {% endfor %}
         </div>
     </div>
-    
+
     <script>
         setTimeout(() => location.reload(), 3000);
     </script>
@@ -65,7 +65,7 @@ nodes = []
 
 @app.route('/')
 def dashboard():
-    return render_template_string(HTML_TEMPLATE, 
+    return render_template_string(HTML_TEMPLATE,
         platform="Windows",
         scms_status="Active",
         messages=messages[-10:],
@@ -80,29 +80,33 @@ def get_nodes():
     return jsonify(nodes)
 
 def message_listener():
-    """Listen for V2X messages"""
+    """Listen for V2X messages on port 5008"""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(('0.0.0.0', 5005))
+    sock.bind(('0.0.0.0', 5008))  # USING PORT 5008
     sock.settimeout(1.0)
-    
+
+    print(f"Dashboard listening on port 5008...")
+
     while True:
         try:
             data, addr = sock.recvfrom(65535)
             msg = json.loads(data.decode())
-            
+
             msg_type = "CAM" if msg.get('crypto') == 'classical' else "DENM"
-            
+
             messages.append({
                 'type': msg_type.lower(),
                 'content': str(msg),
                 'time': time.strftime("%H:%M:%S"),
                 'sender': addr[0]
             })
-            
+
             # Keep only last 100 messages
             if len(messages) > 100:
                 messages.pop(0)
-                
+
+            print(f"Received {msg_type} from {addr[0]}")
+
         except socket.timeout:
             continue
         except Exception as e:
@@ -112,7 +116,7 @@ if __name__ == '__main__':
     # Start listener thread
     listener_thread = threading.Thread(target=message_listener, daemon=True)
     listener_thread.start()
-    
+
     # Initialize nodes
     nodes = [
         {'name': 'Root CA', 'status': 'Running'},
@@ -121,5 +125,5 @@ if __name__ == '__main__':
         {'name': 'Vehicle 2', 'status': 'Broadcasting'},
         {'name': 'RSE 1', 'status': 'Active'}
     ]
-    
-    app.run(host='0.0.0.0', port=8080, debug=True)
+
+    app.run(host='0.0.0.0', port=8080, debug=False)  # debug=False to avoid auto-reload issues
