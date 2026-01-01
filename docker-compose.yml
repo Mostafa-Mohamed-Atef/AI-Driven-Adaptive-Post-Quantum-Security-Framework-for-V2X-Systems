@@ -20,6 +20,8 @@ services:
       - root-ca
     environment:
       - ROOT_CA_URL=http://root-ca:5001
+    ports:
+      - "5002:5002"
 
   pca:
     build: .
@@ -32,6 +34,8 @@ services:
       - linkage-auth-2
     environment:
       - ICA_URL=http://intermediate-ca:5002
+    ports:
+      - "5005:5005"  # Changed to 5005 to avoid conflict
 
   linkage-auth-1:
     build: .
@@ -130,7 +134,7 @@ services:
     volumes:
       - ./dashboard:/app/dashboard
     ports:
-      - "8080:8080"
+      - "9001:8000"
     depends_on:
       - vehicle-1
       - vehicle-2
@@ -138,3 +142,4 @@ services:
 
 volumes:
   postgres_data:
+

@@ -1,129 +1,97 @@
-﻿from flask import Flask, render_template_string, jsonify
-import json
+﻿from flask import Flask, jsonify
 import threading
 import socket
+import json
+from datetime import datetime
 import time
 
 app = Flask(__name__)
 
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>V2X Security Architecture Dashboard</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .container { display: flex; gap: 20px; }
-        .panel { flex: 1; border: 1px solid #ccc; padding: 15px; border-radius: 5px; }
-        .crypto { background: #e3f2fd; }
-        .messages { background: #f3e5f5; }
-        .nodes { background: #e8f5e8; }
-        .message { padding: 5px; margin: 5px 0; border-left: 3px solid; }
-        .cam { border-color: #2196f3; }
-        .denm { border-color: #f44336; }
-        h3 { color: #333; border-bottom: 2px solid; padding-bottom: 5px; }
-    </style>
-</head>
-<body>
-    <h1>V2X Security Architecture Dashboard</h1>
-    <p><strong>Platform:</strong> {{ platform }} | <strong>CAM Crypto:</strong> ECDSA | <strong>DENM Crypto:</strong> PQC Simulation</p>
-
-    <div class="container">
-        <div class="panel crypto">
-            <h3>Cryptography Status</h3>
-            <p><strong>Classical (CAM):</strong> ECDSA P-256 SHA256</p>
-            <p><strong>Post-Quantum (DENM):</strong> CRYSTALS-Dilithium2 Simulation</p>
-            <p><strong>SCMS Status:</strong> {{ scms_status }}</p>
-        </div>
-
-        <div class="panel messages">
-            <h3>Recent Messages</h3>
-            {% for msg in messages[-10:] %}
-            <div class="message {{ msg.type }}">
-                [{{ msg.time }}] {{ msg.type }}: {{ msg.content|truncate(50) }}
-            </div>
-            {% endfor %}
-        </div>
-
-        <div class="panel nodes">
-            <h3>Active Nodes</h3>
-            {% for node in nodes %}
-            <p>{{ node.name }}: {{ node.status }}</p>
-            {% endfor %}
-        </div>
-    </div>
-
-    <script>
-        setTimeout(() => location.reload(), 3000);
-    </script>
-</body>
-</html>
-"""
-
+# Store messages
 messages = []
-nodes = []
+MAX_MESSAGES = 100
+
+print("=== V2X Dashboard Starting ===")
+
+def udp_listener():
+    """Listen for V2X messages on UDP port 5008"""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.bind(('0.0.0.0', 5008))
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ✓ UDP listener started on port 5008")
+        
+        while True:
+            data, addr = sock.recvfrom(1024)
+            try:
+                msg = json.loads(data.decode())
+                msg['received_at'] = datetime.now().strftime('%H:%M:%S')
+                msg['source_ip'] = addr[0]
+                
+                messages.append(msg)
+                if len(messages) > MAX_MESSAGES:
+                    messages.pop(0)
+                
+                print(f"[{msg['received_at']}] Received: {msg.get('type', 'UNKNOWN')} from vehicle {msg.get('vehicle_id', 'unknown')}")
+                
+            except json.JSONDecodeError:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ✗ Invalid JSON from {addr[0]}")
+            except Exception as e:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ✗ Error processing: {e}")
+                
+    except Exception as e:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ✗ UDP listener failed: {e}")
+        import traceback
+        traceback.print_exc()
 
 @app.route('/')
-def dashboard():
-    return render_template_string(HTML_TEMPLATE,
-        platform="Windows",
-        scms_status="Active",
-        messages=messages[-10:],
-        nodes=nodes)
+def index():
+    return jsonify({
+        "service": "V2X Security Dashboard",
+        "status": "running",
+        "udp_port": 5008,
+        "messages_received": len(messages),
+        "endpoints": ["/", "/health", "/messages", "/clear", "/stats"]
+    })
 
-@app.route('/api/messages')
+@app.route('/health')
+def health():
+    return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
+
+@app.route('/messages')
 def get_messages():
-    return jsonify(messages[-20:])
+    return jsonify({
+        "count": len(messages),
+        "messages": messages[-20:]  # Last 20 messages
+    })
 
-@app.route('/api/nodes')
-def get_nodes():
-    return jsonify(nodes)
+@app.route('/clear')
+def clear_messages():
+    messages.clear()
+    return jsonify({"status": "cleared", "count": 0})
 
-def message_listener():
-    """Listen for V2X messages on port 5008"""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(('0.0.0.0', 5008))  # USING PORT 5008
-    sock.settimeout(1.0)
-
-    print(f"Dashboard listening on port 5008...")
-
-    while True:
-        try:
-            data, addr = sock.recvfrom(65535)
-            msg = json.loads(data.decode())
-
-            msg_type = "CAM" if msg.get('crypto') == 'classical' else "DENM"
-
-            messages.append({
-                'type': msg_type.lower(),
-                'content': str(msg),
-                'time': time.strftime("%H:%M:%S"),
-                'sender': addr[0]
-            })
-
-            # Keep only last 100 messages
-            if len(messages) > 100:
-                messages.pop(0)
-
-            print(f"Received {msg_type} from {addr[0]}")
-
-        except socket.timeout:
-            continue
-        except Exception as e:
-            print(f"Error: {e}")
+@app.route('/stats')
+def stats():
+    cam_count = sum(1 for m in messages if m.get('type') == 'CAM')
+    denm_count = sum(1 for m in messages if m.get('type') == 'DENM')
+    classical_count = sum(1 for m in messages if m.get('crypto') == 'classical')
+    pqc_count = sum(1 for m in messages if m.get('crypto') == 'post_quantum')
+    
+    return jsonify({
+        "total_messages": len(messages),
+        "cam_messages": cam_count,
+        "denm_messages": denm_count,
+        "classical_crypto": classical_count,
+        "post_quantum_crypto": pqc_count
+    })
 
 if __name__ == '__main__':
-    # Start listener thread
-    listener_thread = threading.Thread(target=message_listener, daemon=True)
-    listener_thread.start()
-
-    # Initialize nodes
-    nodes = [
-        {'name': 'Root CA', 'status': 'Running'},
-        {'name': 'PCA', 'status': 'Running'},
-        {'name': 'Vehicle 1', 'status': 'Broadcasting'},
-        {'name': 'Vehicle 2', 'status': 'Broadcasting'},
-        {'name': 'RSE 1', 'status': 'Active'}
-    ]
-
-    app.run(host='0.0.0.0', port=8080, debug=False)  # debug=False to avoid auto-reload issues
+    # Start UDP listener in background thread
+    udp_thread = threading.Thread(target=udp_listener, daemon=True)
+    udp_thread.start()
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] UDP listener thread started")
+    
+    # Give UDP thread a moment to start
+    time.sleep(1)
+    
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Starting Flask server on port 8000")
+    app.run(host='0.0.0.0', port=8000, debug=False, use_reloader=False)
