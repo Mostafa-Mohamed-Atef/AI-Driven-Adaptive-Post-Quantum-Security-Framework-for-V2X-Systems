@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>V2X Security Dashboard</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Arial;margin:16px;background:#f7f9fc}
+    header{display:flex;justify-content:space-between;align-items:center}
+    h1{margin:0;font-size:1.1rem}
+    .controls{display:flex;gap:8px}
+    button{padding:6px 10px;border-radius:6px;border:1px solid #ccc;background:#fff;cursor:pointer}
+    #stats{margin-top:12px}
+    table{width:100%;border-collapse:collapse;margin-top:12px;background:#fff}
+    th,td{padding:8px;border-bottom:1px solid #eee;text-align:left;font-size:0.9rem}
+    tr:nth-child(even){background:#fbfdff}
+    .small{font-size:0.85rem;color:#555}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>V2X Security Dashboard</h1>
+    <div class="controls">
+      <button id="clearBtn">Clear</button>
+      <button id="refreshBtn">Refresh</button>
+    </div>
+  </header>
+
+  <div id="stats" class="small">Connecting…</div>
+
+  <table id="messagesTable">
+    <thead>
+      <tr><th>Time</th><th>Vehicle</th><th>Type</th><th>Crypto</th><th>Source IP</th></tr>
+    </thead>
+    <tbody>
+      <tr><td colspan="5" class="small">No messages yet.</td></tr>
+    </tbody>
+  </table>
+
+  <script>
+    const statsEl = document.getElementById('stats');
+    const tbody = document.querySelector('#messagesTable tbody');
+    const clearBtn = document.getElementById('clearBtn');
+    const refreshBtn = document.getElementById('refreshBtn');
+
+    async function fetchMessages() {
+      try {
+        const res = await fetch('/messages');
+        const obj = await res.json();
+        const msgs = obj.messages || [];
+
+        statsEl.textContent = `Messages: ${obj.count} — showing ${msgs.length} most recent`;
+
+        if(msgs.length === 0){
+          tbody.innerHTML = '<tr><td colspan="5" class="small">No messages yet.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = msgs.map(m => `
+          <tr>
+            <td>${m.received_at||''}</td>
+            <td>${m.vehicle_id||m.vessel||'n/a'}</td>
+            <td>${m.type||''}</td>
+            <td>${m.crypto||''}</td>
+            <td>${m.source_ip||''}</td>
+          </tr>
+        `).join('');
+      } catch(e){
+        statsEl.textContent = 'Error fetching messages';
+        console.error(e);
+      }
+    }
+
+    clearBtn.addEventListener('click', async () => {
+      await fetch('/clear');
+      fetchMessages();
+    });
+
+    refreshBtn.addEventListener('click', fetchMessages);
+
+    // Poll every 1s
+    fetchMessages();
+    setInterval(fetchMessages, 1000);
+  </script>
+</body>
+</html>

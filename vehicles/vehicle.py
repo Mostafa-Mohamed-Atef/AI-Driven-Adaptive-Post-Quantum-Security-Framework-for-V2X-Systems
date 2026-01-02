@@ -81,6 +81,7 @@ class Vehicle:
         """Generate DENM with PQC simulation"""
         denm_data = {
             'message_type': 'DENM',
+            'vehicle_id': self.vehicle_id,
             'event_type': event_type,
             'severity': severity,
             'position': [42.3314, -83.0458],
@@ -115,13 +116,17 @@ class Vehicle:
             if sys.platform == 'win32':
                 dashboard_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             
+            # Use environment-configurable dashboard host/port so Docker service name works
+            dashboard_host = os.environ.get('DASHBOARD_HOST', 'dashboard')
+            dashboard_port = int(os.environ.get('DASHBOARD_PORT', '5008'))
+
             dashboard_socket.sendto(
                 message.encode(),
-                ('172.18.0.4', 5008)  # Dashboard IP and port\n
+                (dashboard_host, dashboard_port)
             )
             dashboard_socket.close()
-            
-            logging.info(f"Vehicle {self.vehicle_id} broadcast to dashboard on port 5008: {message[:50]}...")
+
+            logging.info(f"Vehicle {self.vehicle_id} broadcast to dashboard {dashboard_host}:{dashboard_port}: {message[:50]}...")
         except Exception as e:
             logging.error(f"Broadcast error: {e}")
     def start_listening(self):

@@ -1,4 +1,4 @@
-﻿from flask import Flask, jsonify
+﻿from flask import Flask, jsonify, send_from_directory
 import threading
 import socket
 import json
@@ -24,9 +24,18 @@ def udp_listener():
             data, addr = sock.recvfrom(1024)
             try:
                 msg = json.loads(data.decode())
+
+                # Normalize payloads that wrap the real fields under a `data` key.
+                # Vehicles send {'data': {...}, 'signature': ..., 'crypto': ...}
+                if isinstance(msg, dict) and 'data' in msg and isinstance(msg['data'], dict):
+                    payload = msg['data']
+                    # populate flat fields expected by the dashboard/UI
+                    msg.setdefault('type', payload.get('message_type') or payload.get('type'))
+                    msg.setdefault('vehicle_id', payload.get('vehicle_id') or payload.get('vehicle'))
+
                 msg['received_at'] = datetime.now().strftime('%H:%M:%S')
                 msg['source_ip'] = addr[0]
-                
+
                 messages.append(msg)
                 if len(messages) > MAX_MESSAGES:
                     messages.pop(0)
@@ -45,12 +54,27 @@ def udp_listener():
 
 @app.route('/')
 def index():
+    # Serve the static single-page dashboard
+    try:
+        return send_from_directory('static', 'index.html')
+    except Exception:
+        return jsonify({
+            "service": "V2X Security Dashboard",
+            "status": "running",
+            "udp_port": 5008,
+            "messages_received": len(messages),
+            "endpoints": ["/", "/health", "/messages", "/clear", "/stats"]
+        })
+
+
+@app.route('/status')
+def status():
     return jsonify({
         "service": "V2X Security Dashboard",
         "status": "running",
         "udp_port": 5008,
         "messages_received": len(messages),
-        "endpoints": ["/", "/health", "/messages", "/clear", "/stats"]
+        "endpoints": ["/status", "/health", "/messages", "/clear", "/stats"]
     })
 
 @app.route('/health')
