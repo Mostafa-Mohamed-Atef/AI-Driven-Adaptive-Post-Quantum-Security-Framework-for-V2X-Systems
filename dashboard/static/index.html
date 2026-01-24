@@ -1,86 +1,621 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="en" class="dark">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>V2X Security Dashboard</title>
-  <style>
-    body{font-family:system-ui,Segoe UI,Arial;margin:16px;background:#f7f9fc}
-    header{display:flex;justify-content:space-between;align-items:center}
-    h1{margin:0;font-size:1.1rem}
-    .controls{display:flex;gap:8px}
-    button{padding:6px 10px;border-radius:6px;border:1px solid #ccc;background:#fff;cursor:pointer}
-    #stats{margin-top:12px}
-    table{width:100%;border-collapse:collapse;margin-top:12px;background:#fff}
-    th,td{padding:8px;border-bottom:1px solid #eee;text-align:left;font-size:0.9rem}
-    tr:nth-child(even){background:#fbfdff}
-    .small{font-size:0.85rem;color:#555}
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V2X Security Monitoring Hub</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dark: {
+                            900: '#0f172a',
+                            800: '#1e293b',
+                            700: '#334155',
+                            600: '#475569'
+                        },
+                        primary: {
+                            500: '#8b5cf6', // Violet
+                            600: '#7c3aed'
+                        },
+                        secondary: {
+                            500: '#ec4899', // Pink
+                            600: '#db2777'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Fonts & Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #e2e8f0; }
+        .card { background-color: #1e293b; border-radius: 0.75rem; border: 1px solid #334155; }
+        .sidebar-link { transition: all 0.2s; }
+        .sidebar-link:hover, .sidebar-link.active { background-color: #334155; color: #fff; border-right: 3px solid #8b5cf6; }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    </style>
 </head>
-<body>
-  <header>
-    <h1>V2X Security Dashboard</h1>
-    <div class="controls">
-      <button id="clearBtn">Clear</button>
-      <button id="refreshBtn">Refresh</button>
-    </div>
-  </header>
+<body class="flex h-screen overflow-hidden">
 
-  <div id="stats" class="small">Connecting…</div>
+    <!-- Sidebar -->
+    <aside class="w-64 bg-dark-900 border-r border-dark-700 flex flex-col hidden md:flex">
+        <div class="p-6 flex items-center gap-3">
+            <div class="w-10 h-10 bg-gradient-to-br from-primary-500 to-secondary-500 rounded-lg flex items-center justify-center text-white font-bold text-xl">
+                <i class="fas fa-shield-alt"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-lg leading-tight text-white">V2X Security</h1>
+                <p class="text-xs text-gray-400">Monitoring Hub</p>
+            </div>
+        </div>
 
-  <table id="messagesTable">
-    <thead>
-      <tr><th>Time</th><th>Vehicle</th><th>Type</th><th>Crypto</th><th>Source IP</th></tr>
-    </thead>
-    <tbody>
-      <tr><td colspan="5" class="small">No messages yet.</td></tr>
-    </tbody>
-  </table>
+        <nav class="flex-1 px-4 space-y-2 mt-4">
+            <a href="#" class="sidebar-link active flex items-center gap-3 px-4 py-3 text-gray-300 rounded-lg">
+                <i class="fas fa-home w-5 text-center"></i> System Overview
+            </a>
+            <a href="#" class="sidebar-link flex items-center gap-3 px-4 py-3 text-gray-300 rounded-lg">
+                <i class="fas fa-certificate w-5 text-center"></i> Certificates
+            </a>
+            <a href="#" class="sidebar-link flex items-center gap-3 px-4 py-3 text-gray-300 rounded-lg">
+                <i class="fas fa-exclamation-triangle w-5 text-center"></i> Misbehavior Reports
+            </a>
+            <a href="#" class="sidebar-link flex items-center gap-3 px-4 py-3 text-gray-300 rounded-lg">
+                <i class="fas fa-car w-5 text-center"></i> Fleet Monitor
+            </a>
+            <a href="#" class="sidebar-link flex items-center gap-3 px-4 py-3 text-gray-300 rounded-lg">
+                <i class="fas fa-chart-line w-5 text-center"></i> Analytics
+            </a>
+        </nav>
 
-  <script>
-    const statsEl = document.getElementById('stats');
-    const tbody = document.querySelector('#messagesTable tbody');
-    const clearBtn = document.getElementById('clearBtn');
-    const refreshBtn = document.getElementById('refreshBtn');
+        <div class="p-4 border-t border-dark-700">
+            <div class="flex items-center gap-3 px-2 py-2">
+                <div class="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center overflow-hidden">
+                    <img src="https://ui-avatars.com/api/?name=Admin+User&background=random" alt="Admin">
+                </div>
+                <div>
+                    <p class="text-sm font-medium text-white">Admin User</p>
+                    <p class="text-xs text-gray-400">Security Officer</p>
+                </div>
+                <button class="ml-auto text-gray-400 hover:text-white"><i class="fas fa-ellipsis-v"></i></button>
+            </div>
+        </div>
+    </aside>
 
-    async function fetchMessages() {
-      try {
-        const res = await fetch('/messages');
-        const obj = await res.json();
-        const msgs = obj.messages || [];
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col h-screen overflow-hidden relative">
+        <!-- Top Bar -->
+        <header class="h-16 bg-dark-900 border-b border-dark-700 flex items-center justify-between px-6 shrink-0">
+            <div class="flex items-center gap-4">
+                <h2 class="text-xl font-bold text-white">System Overview</h2>
+                <span class="px-3 py-1 text-xs font-medium rounded-full bg-green-500/10 text-green-500 border border-green-500/20">
+                    <i class="fas fa-circle text-[8px] mr-1"></i> All Systems Operational
+                </span>
+            </div>
+            
+            <div class="flex items-center gap-4">
+                <div class="relative">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                    <input type="text" placeholder="Search..." class="bg-dark-800 border border-dark-700 rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:border-primary-500 text-gray-300 w-64 transition-colors">
+                </div>
+                <button class="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-dark-800 text-gray-400 transition-colors relative">
+                    <i class="fas fa-bell"></i>
+                    <span class="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
+                </button>
+                <button class="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-dark-800 text-gray-400 transition-colors">
+                    <i class="fas fa-cog"></i>
+                </button>
+                <button class="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-dark-800 text-gray-400 transition-colors">
+                    <i class="fas fa-moon"></i>
+                </button>
+            </div>
+        </header>
 
-        statsEl.textContent = `Messages: ${obj.count} — showing ${msgs.length} most recent`;
+        <!-- Dashboard Content -->
+        <div class="flex-1 overflow-y-auto p-6 space-y-6" id="dashboard-container">
+            
+            <!-- KPI Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="card p-5">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="w-10 h-10 rounded-lg bg-primary-500/20 text-primary-500 flex items-center justify-center text-xl">
+                            <i class="fas fa-car"></i>
+                        </div>
+                        <span class="text-green-500 text-xs font-bold flex items-center gap-1">
+                            <i class="fas fa-arrow-up"></i> 12%
+                        </span>
+                    </div>
+                    <h3 class="text-3xl font-bold text-white mb-1" id="kpi-vehicles">--</h3>
+                    <p class="text-sm text-gray-400">Active Vehicles</p>
+                </div>
 
-        if(msgs.length === 0){
-          tbody.innerHTML = '<tr><td colspan="5" class="small">No messages yet.</td></tr>';
-          return;
+                <div class="card p-5">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="w-10 h-10 rounded-lg bg-secondary-500/20 text-secondary-500 flex items-center justify-center text-xl">
+                            <i class="fas fa-certificate"></i>
+                        </div>
+                        <span class="text-green-500 text-xs font-bold flex items-center gap-1">
+                            <i class="fas fa-arrow-up"></i> 8%
+                        </span>
+                    </div>
+                    <h3 class="text-3xl font-bold text-white mb-1" id="kpi-certificates">--</h3>
+                    <p class="text-sm text-gray-400">Certificates Issued</p>
+                </div>
+
+                <div class="card p-5">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="w-10 h-10 rounded-lg bg-yellow-500/20 text-yellow-500 flex items-center justify-center text-xl">
+                            <i class="fas fa-shield-virus"></i>
+                        </div>
+                        <span class="text-gray-500 text-xs font-bold flex items-center gap-1">
+                            <i class="fas fa-minus"></i> 0%
+                        </span>
+                    </div>
+                    <h3 class="text-3xl font-bold text-white mb-1" id="kpi-reports">--</h3>
+                    <p class="text-sm text-gray-400">Pending Reports</p>
+                </div>
+
+                <div class="card p-5">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="w-10 h-10 rounded-lg bg-green-500/20 text-green-500 flex items-center justify-center text-xl">
+                            <i class="fas fa-chart-bar"></i>
+                        </div>
+                        <span class="text-green-500 text-xs font-bold flex items-center gap-1">
+                            <i class="fas fa-arrow-up"></i> 99.8%
+                        </span>
+                    </div>
+                    <h3 class="text-3xl font-bold text-white mb-1" id="kpi-uptime">--</h3>
+                    <p class="text-sm text-gray-400">System Uptime</p>
+                </div>
+            </div>
+
+            <!-- Component Status Grid -->
+            <div>
+                <h3 class="text-lg font-semibold text-white mb-4">Component Status</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3" id="component-grid">
+                    <!-- Populated by JS -->
+                    <div class="text-center text-gray-500 py-4">Loading components...</div>
+                </div>
+            </div>
+
+            <!-- Charts Row -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Crypto Distribution -->
+                <div class="card p-6">
+                    <h3 class="text-lg font-semibold text-white mb-6">Cryptography Distribution</h3>
+                    <div class="relative h-64 w-full flex items-center justify-center">
+                        <canvas id="cryptoDistChart"></canvas>
+                        <!-- Center Text Overlay -->
+                        <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                            <span class="text-xs text-gray-400">Total</span>
+                            <span class="text-xl font-bold text-white">100%</span>
+                        </div>
+                    </div>
+                    <div class="mt-6 flex justify-center gap-6">
+                        <div class="flex items-center gap-2">
+                            <span class="w-3 h-3 rounded-full bg-primary-600"></span>
+                            <span class="text-xs text-gray-300">Classical (ECDSA)</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="w-3 h-3 rounded-full bg-secondary-600"></span>
+                            <span class="text-xs text-gray-300">PQC (Dilithium)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Provisioning Trends -->
+                <div class="card p-6 lg:col-span-2">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="text-lg font-semibold text-white">Certificate Provisioning Trends</h3>
+                        <div class="flex bg-dark-800 rounded-lg p-1 border border-dark-700">
+                            <button class="px-3 py-1 text-xs font-medium text-white bg-dark-700 rounded shadow-sm">7D</button>
+                            <button class="px-3 py-1 text-xs font-medium text-gray-400 hover:text-white">30D</button>
+                            <button class="px-3 py-1 text-xs font-medium text-gray-400 hover:text-white">90D</button>
+                        </div>
+                    </div>
+                    <div class="h-64 w-full">
+                        <canvas id="provisioningChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Activity & Reports Row -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                
+                <!-- Real-time Activity -->
+                <div class="card p-6">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="text-lg font-semibold text-white">Real-time Activity Feed</h3>
+                        <span class="flex h-2 w-2 relative">
+                            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                            <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                        </span>
+                    </div>
+                    <div class="space-y-4 max-h-[400px] overflow-y-auto pr-2" id="activity-feed">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Recent Misbehavior Reports -->
+                <div class="card p-6">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="text-lg font-semibold text-white">Recent Misbehavior Reports</h3>
+                        <a href="#" class="text-xs text-primary-500 hover:text-primary-400">View All &rarr;</a>
+                    </div>
+                    <div class="space-y-3" id="misbehavior-list">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Fleet & Performance Row -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-6">
+                <!-- Fleet Status -->
+                <div class="card p-6">
+                    <h3 class="text-lg font-semibold text-white mb-6">Fleet Status Overview</h3>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3" id="fleet-grid">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Crypto Performance -->
+                <div class="card p-6">
+                    <h3 class="text-lg font-semibold text-white mb-6">Cryptography Performance Comparison</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- ECDSA -->
+                        <div class="bg-dark-800/50 rounded-lg p-4 border border-dark-700">
+                            <div class="flex items-center gap-3 mb-4">
+                                <div class="w-8 h-8 rounded bg-primary-500/20 text-primary-500 flex items-center justify-center">
+                                    <i class="fas fa-lock text-sm"></i>
+                                </div>
+                                <div>
+                                    <h4 class="text-sm font-bold text-white">ECDSA (Classical)</h4>
+                                    <p class="text-[10px] text-gray-500">Traditional cryptography</p>
+                                </div>
+                            </div>
+                            
+                            <div class="space-y-3">
+                                <div>
+                                    <div class="flex justify-between text-xs mb-1"><span class="text-gray-400">Signature Time</span> <span class="text-white">0.8ms</span></div>
+                                    <div class="w-full bg-dark-700 rounded-full h-1.5"><div class="bg-primary-500 h-1.5 rounded-full" style="width: 25%"></div></div>
+                                </div>
+                                <div>
+                                    <div class="flex justify-between text-xs mb-1"><span class="text-gray-400">Verification Time</span> <span class="text-white">1.2ms</span></div>
+                                    <div class="w-full bg-dark-700 rounded-full h-1.5"><div class="bg-primary-500 h-1.5 rounded-full" style="width: 40%"></div></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Dilithium -->
+                        <div class="bg-dark-800/50 rounded-lg p-4 border border-dark-700">
+                            <div class="flex items-center gap-3 mb-4">
+                                <div class="w-8 h-8 rounded bg-secondary-500/20 text-secondary-500 flex items-center justify-center">
+                                    <i class="fas fa-shield-alt text-sm"></i>
+                                </div>
+                                <div>
+                                    <h4 class="text-sm font-bold text-white">Dilithium (PQC)</h4>
+                                    <p class="text-[10px] text-gray-500">Post-quantum cryptography</p>
+                                </div>
+                            </div>
+                            
+                            <div class="space-y-3">
+                                <div>
+                                    <div class="flex justify-between text-xs mb-1"><span class="text-gray-400">Signature Time</span> <span class="text-white">3.2ms</span></div>
+                                    <div class="w-full bg-dark-700 rounded-full h-1.5"><div class="bg-secondary-500 h-1.5 rounded-full" style="width: 80%"></div></div>
+                                </div>
+                                <div>
+                                    <div class="flex justify-between text-xs mb-1"><span class="text-gray-400">Verification Time</span> <span class="text-white">2.8ms</span></div>
+                                    <div class="w-full bg-dark-700 rounded-full h-1.5"><div class="bg-secondary-500 h-1.5 rounded-full" style="width: 70%"></div></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Message Log Row -->
+            <div class="card p-6 mb-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold text-white">Live Message Log</h3>
+                    <div class="flex gap-2">
+                        <button id="clearBtn" class="px-3 py-1 text-xs font-medium text-white bg-red-500/10 border border-red-500/20 rounded hover:bg-red-500/20 transition-colors">Clear</button>
+                        <button id="refreshBtn" class="px-3 py-1 text-xs font-medium text-white bg-primary-500/10 border border-primary-500/20 rounded hover:bg-primary-500/20 transition-colors">Refresh</button>
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-dark-700 text-gray-400 text-xs uppercase">
+                                <th class="py-3 px-4 font-semibold">Time</th>
+                                <th class="py-3 px-4 font-semibold">Vehicle</th>
+                                <th class="py-3 px-4 font-semibold">Type</th>
+                                <th class="py-3 px-4 font-semibold">Crypto</th>
+                                <th class="py-3 px-4 font-semibold">Source IP</th>
+                            </tr>
+                        </thead>
+                        <tbody id="messages-table-body" class="text-sm text-gray-300 divide-y divide-dark-700">
+                            <tr><td colspan="5" class="py-4 text-center text-gray-500">Waiting for messages...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Scripts -->
+    <script>
+        // Chart Instances
+        let cryptoDistChart = null;
+        let provisioningChart = null;
+
+        // Initialize Charts
+        function initCharts() {
+            // Distribution Chart
+            const ctxDist = document.getElementById('cryptoDistChart').getContext('2d');
+            cryptoDistChart = new Chart(ctxDist, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Classical (ECDSA)', 'PQC (Dilithium)'],
+                    datasets: [{
+                        data: [71, 29],
+                        backgroundColor: ['#7c3aed', '#ec4899'],
+                        borderWidth: 0,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '70%',
+                    plugins: {
+                        legend: { display: false }
+                    }
+                }
+            });
+
+            // Trends Chart
+            const ctxProv = document.getElementById('provisioningChart').getContext('2d');
+            provisioningChart = new Chart(ctxProv, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: []
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#334155', borderDash: [5, 5] },
+                            ticks: { color: '#94a3b8' }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#94a3b8' }
+                        }
+                    },
+                    plugins: {
+                        legend: { 
+                            display: true,
+                            labels: { color: '#cbd5e1' },
+                            position: 'top',
+                            align: 'start'
+                        }
+                    },
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    }
+                }
+            });
         }
 
-        tbody.innerHTML = msgs.map(m => `
-          <tr>
-            <td>${m.received_at||''}</td>
-            <td>${m.vehicle_id||m.vessel||'n/a'}</td>
-            <td>${m.type||''}</td>
-            <td>${m.crypto||''}</td>
-            <td>${m.source_ip||''}</td>
-          </tr>
-        `).join('');
-      } catch(e){
-        statsEl.textContent = 'Error fetching messages';
-        console.error(e);
-      }
-    }
+        // Data Fetching Functions
+        async function fetchOverview() {
+            try {
+                const res = await fetch('/api/overview');
+                const data = await res.json();
+                document.getElementById('kpi-vehicles').textContent = data.active_vehicles;
+                document.getElementById('kpi-certificates').textContent = data.certificates_issued.toLocaleString();
+                document.getElementById('kpi-reports').textContent = data.pending_reports;
+                document.getElementById('kpi-uptime').textContent = data.system_uptime;
+            } catch (e) { console.error("Overview error", e); }
+        }
 
-    clearBtn.addEventListener('click', async () => {
-      await fetch('/clear');
-      fetchMessages();
-    });
+        async function fetchComponents() {
+            try {
+                const res = await fetch('/api/components');
+                const data = await res.json();
+                const grid = document.getElementById('component-grid');
+                grid.innerHTML = data.map(c => {
+                    let colorClass = c.color === 'green' ? 'text-green-500' : (c.color === 'yellow' ? 'text-yellow-500' : 'text-red-500');
+                    let bgClass = c.color === 'green' ? 'bg-green-500/10 border-green-500/20' : (c.color === 'yellow' ? 'bg-yellow-500/10 border-yellow-500/20' : 'bg-red-500/10 border-red-500/20');
+                    let statusColor = c.color === 'green' ? 'bg-green-500' : (c.color === 'yellow' ? 'bg-yellow-500' : 'bg-red-500');
 
-    refreshBtn.addEventListener('click', fetchMessages);
+                    return `
+                    <div class="bg-dark-800 border border-dark-700 rounded-lg p-3 flex flex-col justify-between h-24 relative overflow-hidden group hover:border-dark-600 transition-colors">
+                        <div class="flex justify-between items-start z-10">
+                            <div class="flex items-center gap-2">
+                                <span class="w-2 h-2 rounded-full ${statusColor}"></span>
+                                <span class="font-semibold text-sm text-gray-200">${c.name}</span>
+                            </div>
+                            <i class="fas fa-${c.icon} text-gray-600 text-xs"></i>
+                        </div>
+                        <div class="z-10">
+                            <span class="text-xs ${colorClass}">${c.status}</span>
+                        </div>
+                    </div>
+                    `;
+                }).join('');
+            } catch (e) { console.error("Components error", e); }
+        }
 
-    // Poll every 1s
-    fetchMessages();
-    setInterval(fetchMessages, 1000);
-  </script>
+        async function fetchCharts() {
+            try {
+                // Distribution
+                const resDist = await fetch('/api/charts/distribution');
+                const dataDist = await resDist.json();
+                cryptoDistChart.data.datasets[0].data = dataDist.map(d => d.value);
+                cryptoDistChart.update();
+
+                // Trends
+                const resProv = await fetch('/api/charts/provisioning');
+                const dataProv = await resProv.json();
+                provisioningChart.data.labels = dataProv.labels;
+                provisioningChart.data.datasets = dataProv.datasets.map(d => ({
+                    ...d,
+                    tension: 0.4,
+                    borderWidth: 2,
+                    pointRadius: 0
+                }));
+                provisioningChart.update();
+
+            } catch (e) { console.error("Charts error", e); }
+        }
+
+        async function fetchActivity() {
+            try {
+                const res = await fetch('/api/activity');
+                const data = await res.json();
+                const feed = document.getElementById('activity-feed');
+                feed.innerHTML = data.map(item => `
+                    <div class="flex gap-4 p-3 rounded-lg bg-dark-800/50 border border-dark-700/50 hover:bg-dark-800 transition-colors">
+                        <div class="shrink-0 w-8 h-8 rounded-full bg-dark-700 flex items-center justify-center ${item.color.replace('text-', 'text-')}">
+                            <i class="fas fa-${item.icon} text-sm"></i>
+                        </div>
+                        <div class="flex-1">
+                            <p class="text-sm text-gray-200 font-medium">${item.text}</p>
+                            <p class="text-xs text-gray-500 mt-1">${item.time}</p>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) { console.error("Activity error", e); }
+        }
+
+        async function fetchMisbehavior() {
+            try {
+                const res = await fetch('/api/misbehavior');
+                const data = await res.json();
+                const list = document.getElementById('misbehavior-list');
+                list.innerHTML = data.map(item => {
+                    let sevClass = item.severity === 'Critical' ? 'text-red-500 bg-red-500/10 border-red-500/20' : (item.severity === 'Medium' ? 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20' : 'text-green-500 bg-green-500/10 border-green-500/20');
+                    return `
+                    <div class="flex items-center justify-between p-3 bg-dark-800/50 border border-dark-700 rounded-lg">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center shrink-0">
+                                <i class="fas fa-exclamation"></i>
+                            </div>
+                            <div>
+                                <h4 class="text-sm font-semibold text-white">${item.title}</h4>
+                                <p class="text-xs text-gray-500">${item.vehicle_id} • ${item.time}</p>
+                            </div>
+                        </div>
+                        <span class="px-2 py-1 rounded text-[10px] font-bold border ${sevClass}">
+                            ${item.severity.toUpperCase()}
+                        </span>
+                    </div>
+                    `;
+                }).join('');
+            } catch (e) { console.error("Misbehavior error", e); }
+        }
+
+        async function fetchFleet() {
+            try {
+                const res = await fetch('/api/fleet');
+                const data = await res.json();
+                const grid = document.getElementById('fleet-grid');
+                grid.innerHTML = data.map(v => {
+                    let dotColor = v.color === 'green' ? 'bg-green-500' : (v.color === 'yellow' ? 'bg-yellow-500' : 'bg-red-500');
+                    return `
+                    <div class="bg-dark-800/50 border border-dark-700 rounded-lg p-3">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="text-xs font-semibold text-gray-300">${v.id}</span>
+                            <span class="w-2 h-2 rounded-full ${dotColor}"></span>
+                        </div>
+                        <p class="text-[10px] text-gray-500">${v.status} • ${v.time}</p>
+                    </div>
+                    `;
+                }).join('');
+            } catch (e) { console.error("Fleet error", e); }
+        }
+
+        async function fetchMessages() {
+            try {
+                const res = await fetch('/messages');
+                const obj = await res.json();
+                const msgs = obj.messages || [];
+                const tbody = document.getElementById('messages-table-body');
+
+                if (msgs.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-500">No messages yet.</td></tr>';
+                    return;
+                }
+
+                // Reverse to show newest first if backend doesn't already
+                // Backend returns messages[-20:], which is oldest to newest in that slice.
+                // We want newest at top usually? The backend slice is last 20 appended.
+                // So msgs[0] is older than msgs[19].
+                // Let's reverse it for display.
+                const displayMsgs = [...msgs].reverse();
+
+                tbody.innerHTML = displayMsgs.map(m => `
+                    <tr class="hover:bg-dark-800/50 transition-colors">
+                        <td class="py-3 px-4 font-mono text-xs text-gray-400">${m.received_at||''}</td>
+                        <td class="py-3 px-4 font-medium text-white">${m.vehicle_id||m.vessel||'n/a'}</td>
+                        <td class="py-3 px-4"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 text-blue-500 border border-blue-500/20">${m.type||'UNKNOWN'}</span></td>
+                        <td class="py-3 px-4 text-xs text-gray-400">${m.crypto||'—'}</td>
+                        <td class="py-3 px-4 text-xs font-mono text-gray-500">${m.source_ip||''}</td>
+                    </tr>
+                `).join('');
+            } catch (e) { console.error("Messages error", e); }
+        }
+
+        // Init
+        document.addEventListener('DOMContentLoaded', () => {
+            initCharts();
+            
+            // Event Listeners for Log
+            document.getElementById('clearBtn').addEventListener('click', async () => {
+                await fetch('/clear');
+                fetchMessages();
+                fetchOverview();
+            });
+            document.getElementById('refreshBtn').addEventListener('click', fetchMessages);
+            
+            // Initial Fetch
+            fetchOverview();
+            fetchComponents();
+            fetchCharts();
+            fetchActivity();
+            fetchMisbehavior();
+            fetchFleet();
+            fetchMessages();
+
+            // Polling
+            setInterval(fetchOverview, 2000);
+            setInterval(fetchActivity, 2000); // More frequent for "Real-time" feel
+            setInterval(fetchComponents, 5000);
+            setInterval(fetchCharts, 10000);
+            setInterval(fetchMessages, 1000); // Poll messages every second
+        });
+
+    </script>
 </body>
 </html>
