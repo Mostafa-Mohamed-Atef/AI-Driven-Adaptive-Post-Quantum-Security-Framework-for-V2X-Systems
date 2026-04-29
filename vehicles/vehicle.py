@@ -1,4 +1,4 @@
-﻿import json
+import json
 import logging
 import time
 import hashlib
@@ -101,7 +101,7 @@ class Vehicle:
         })
     
     def broadcast_message(self, message):
-        """Broadcast message (Windows compatible) AND send to dashboard"""
+        """Broadcast message (Windows compatible) AND send to dashboard + IDS"""
         try:
             # Original broadcast
             self.udp_socket.sendto(
@@ -109,7 +109,7 @@ class Vehicle:
                 (BROADCAST_ADDR, self.broadcast_port)
             )
             
-            # NEW: Also send to dashboard
+            # Send to dashboard
             import socket
             dashboard_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             dashboard_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -125,6 +125,16 @@ class Vehicle:
                 (dashboard_host, dashboard_port)
             )
             dashboard_socket.close()
+
+            # Send to IDS service for intrusion detection
+            try:
+                ids_host = os.environ.get('IDS_HOST', 'ids-service')
+                ids_port = int(os.environ.get('IDS_PORT', '5011'))
+                ids_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                ids_socket.sendto(message.encode(), (ids_host, ids_port))
+                ids_socket.close()
+            except Exception as ids_err:
+                logging.debug(f"IDS send failed (non-critical): {ids_err}")
 
             logging.info(f"Vehicle {self.vehicle_id} broadcast to dashboard {dashboard_host}:{dashboard_port}: {message[:50]}...")
         except Exception as e:

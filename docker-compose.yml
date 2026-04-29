@@ -78,6 +78,29 @@ services:
     ports:
       - "5004:5004"
 
+  # AI-Driven Intrusion Detection System (IDS)
+  ids-service:
+    build:
+      context: .
+      dockerfile: ids/Dockerfile
+    volumes:
+      - ./ids:/app/ids
+      - ids_models:/app/ids/models/saved
+    depends_on:
+      - ma
+      - redis
+    environment:
+      - MA_URL=http://ma:5004
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - IDS_HTTP_PORT=5010
+      - IDS_UDP_PORT=5011
+      - ANOMALY_THRESHOLD=0.65
+      - TRAINING_EPOCHS=50
+    ports:
+      - "5010:5010"
+      - "5011:5011/udp"
+
   # Vehicle and Infrastructure Nodes
   vehicle-1:
     build: .
@@ -88,9 +111,12 @@ services:
     depends_on:
       - ra
       - ma
+      - ids-service
     environment:
       - RA_URL=http://ra:5003
       - MA_URL=http://ma:5004
+      - IDS_HOST=ids-service
+      - IDS_PORT=5011
 
   vehicle-2:
     build: .
@@ -101,6 +127,10 @@ services:
     depends_on:
       - ra
       - ma
+      - ids-service
+    environment:
+      - IDS_HOST=ids-service
+      - IDS_PORT=5011
 
   rse-1:
     build: .
@@ -110,6 +140,10 @@ services:
     depends_on:
       - ra
       - ma
+      - ids-service
+    environment:
+      - IDS_HOST=ids-service
+      - IDS_PORT=5011
 
   # Database
   postgres:
@@ -142,4 +176,5 @@ services:
 
 volumes:
   postgres_data:
+  ids_models:
 

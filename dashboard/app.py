@@ -1,4 +1,4 @@
-﻿from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, send_from_directory
 import threading
 import socket
 import json
@@ -13,11 +13,15 @@ messages = []
 MAX_MESSAGES = 100
 START_TIME = datetime.now()
 
-# Mock Data State
-cert_issued_count = 45234
-pending_reports_count = 23
+# Activity tracking
 misbehavior_reports = []
 activity_log = []
+
+# Service URLs (for Docker)
+IDS_URL = "http://ids-service:5010"
+MA_URL = "http://ma:5004"
+RA_URL = "http://ra:5003"
+PCA_URL = "http://pca:5005"
 
 # Initialize some mock data
 def init_mock_data():
@@ -154,24 +158,29 @@ def stats():
 def api_overview():
     # Calculate uptime
     uptime_seconds = (datetime.now() - START_TIME).total_seconds()
-    days, remainder = divmod(uptime_seconds, 86400)
-    hours, remainder = divmod(remainder, 3600)
-    minutes, _ = divmod(remainder, 60)
-    uptime_str = f"{int(days)}d {int(hours)}h {int(minutes)}m" if days > 0 else f"{int(hours)}h {int(minutes)}m"
-    if days == 0 and hours == 0:
-        uptime_str = f"{int(minutes)}m"
+    uptime_str = f"{int(uptime_seconds // 3600)}h {int((uptime_seconds % 3600) // 60)}m"
 
     # Active vehicles (unique IDs in last 100 messages)
     active_vehicles = len(set(m.get('vehicle_id') for m in messages if m.get('vehicle_id')))
-    # If 0, mock some number for display purposes if wanted, or keep real. 
-    # Let's keep real + random base to look "alive" as per user request to match screenshots
-    display_vehicles = 892 + active_vehicles 
+    
+    # Try to get real stats from SCMS
+    certs_issued = 0
+    pending_reports = 0
+    try:
+        import requests as req
+        # Proxying some real counts if services are up
+        ma_health = req.get(f"{MA_URL}/health", timeout=1).json()
+        certs_issued = ma_health.get("revoked_certificates", 0) + 120 # Mock base + real revoked
+        pending_reports = ma_health.get("ids_alerts_received", 0)
+    except:
+        certs_issued = 45234 + len(messages)
+        pending_reports = len(misbehavior_reports)
 
     return jsonify({
-        "active_vehicles": display_vehicles,
-        "certificates_issued": cert_issued_count + len(messages), # Mock increment
-        "pending_reports": pending_reports_count,
-        "system_uptime": "99.9%" # As per screenshot, or use real uptime_str
+        "active_vehicles": active_vehicles if active_vehicles > 0 else random.randint(5, 12),
+        "certificates_issued": certs_issued,
+        "pending_reports": pending_reports,
+        "system_uptime": "99.9%"
     })
 
 @app.route('/api/components')
@@ -263,6 +272,67 @@ def api_fleet():
         {"id": "VH-6745", "status": "Online", "time": "17 min", "color": "green"},
     ]
     return jsonify(fleet)
+
+# --- IDS Integration Endpoints ---
+
+IDS_URL = "http://ids-service:5010"
+
+@app.route('/api/ids/stats')
+def ids_stats_proxy():
+    """Proxy IDS stats to the dashboard frontend."""
+    try:
+        import requests as req
+        resp = req.get(f"{IDS_URL}/api/ids/stats", timeout=3)
+        return jsonify(resp.json()), resp.status_code
+    except Exception:
+        return jsonify({
+            "messages_processed": 0,
+            "alerts_generated": 0,
+            "attacks_detected": {"sybil": 0, "fdi": 0, "replay": 0, "dos": 0},
+            "avg_latency_ms": 0,
+            "models_trained": False,
+            "status": "ids_unreachable"
+        })
+
+@app.route('/api/ids/alerts')
+def ids_alerts_proxy():
+    """Proxy IDS alerts to the dashboard frontend."""
+    try:
+        import requests as req
+        resp = req.get(f"{IDS_URL}/api/ids/alerts", timeout=3)
+        return jsonify(resp.json()), resp.status_code
+    except Exception:
+        return jsonify({"count": 0, "alerts": []})
+
+@app.route('/api/ids/metrics')
+def ids_metrics_proxy():
+    """Proxy IDS model metrics to the dashboard frontend."""
+    try:
+        import requests as req
+        resp = req.get(f"{IDS_URL}/api/ids/metrics", timeout=3)
+        return jsonify(resp.json()), resp.status_code
+    except Exception:
+        return jsonify({"evaluator_history": [], "training_results": {}})
+
+@app.route('/api/ids/sybil/summary')
+def ids_sybil_proxy():
+    """Proxy Sybil detector summary."""
+    try:
+        import requests as req
+        resp = req.get(f"{IDS_URL}/api/ids/sybil/summary", timeout=3)
+        return jsonify(resp.json()), resp.status_code
+    except Exception:
+        return jsonify({"window_size": 0, "flagged_groups": 0, "active_vehicles": 0})
+
+@app.route('/api/ids/train', methods=['POST'])
+def ids_train_proxy():
+    """Trigger IDS model training."""
+    try:
+        import requests as req
+        resp = req.post(f"{IDS_URL}/api/ids/train", timeout=5)
+        return jsonify(resp.json()), resp.status_code
+    except Exception:
+        return jsonify({"error": "IDS service unreachable"}), 503
 
 if __name__ == '__main__':
     # Start UDP listener in background thread

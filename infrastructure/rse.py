@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Roadside Equipment (RSE) for V2X
 Receives and processes V2X messages
@@ -47,6 +47,9 @@ class RoadsideEquipment:
                 
                 # Send acknowledgment to dashboard
                 self.send_to_dashboard(message)
+
+                # Forward to IDS for intrusion detection
+                self.send_to_ids(message)
                 
             except Exception as e:
                 logger.error(f"Error processing message: {e}")
@@ -81,6 +84,18 @@ class RoadsideEquipment:
             sock.close()
         except Exception as e:
             logger.error(f"Failed to send to dashboard: {e}")
+
+    def send_to_ids(self, message):
+        """Forward message to IDS service for intrusion detection"""
+        try:
+            import os
+            ids_host = os.environ.get('IDS_HOST', 'ids-service')
+            ids_port = int(os.environ.get('IDS_PORT', '5011'))
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.sendto(json.dumps(message).encode(), (ids_host, ids_port))
+            sock.close()
+        except Exception as e:
+            logger.debug(f"Failed to send to IDS (non-critical): {e}")
 
 if __name__ == '__main__':
     import sys

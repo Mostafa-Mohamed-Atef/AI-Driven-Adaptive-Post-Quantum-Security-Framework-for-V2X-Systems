@@ -1,1 +1,7 @@
 *.log
+/dataset/*
+/env
+/myenv
+/.venv
+/venv
+**/__pycache__
