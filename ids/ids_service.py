@@ -238,6 +238,47 @@ def trigger_training():
     return jsonify({"status": "training_started"})
 
 
+@app.route("/api/ids/adapt", methods=["POST"])
+def adapt_from_feedback():
+    """
+    MA feedback endpoint — fine-tune models on a confirmed sample.
+
+    Expected JSON:
+        { "vehicle_id": "1", "label": 1 }   # label 1=confirmed attack, 0=false positive
+
+    The anomaly detector caches the most recent feature vector per vehicle.
+    This endpoint retrieves that cached vector and fine-tunes both models.
+    """
+    data       = request.get_json() or {}
+    vehicle_id = str(data.get("vehicle_id", ""))
+    label      = int(data.get("label", 1))
+
+    if not vehicle_id:
+        return jsonify({"error": "vehicle_id required"}), 400
+
+    features = anomaly_detector.get_last_features(vehicle_id)
+    if features is None:
+        return jsonify({"error": f"No cached features for vehicle {vehicle_id}"}), 404
+
+    result = trainer.fine_tune(features, label)
+
+    # Propagate updated model weights back into detectors
+    anomaly_detector.set_models(
+        cnn_model=trainer.cnn_model,
+        lstm_model=trainer.lstm_model,
+    )
+    fdi_detector.set_lstm_model(trainer.lstm_model)
+
+    logger.info("Adapted on vehicle=%s label=%d — %s", vehicle_id, label, result.get("status"))
+    return jsonify(result)
+
+
+@app.route("/api/ids/adaptive")
+def adaptive_status():
+    """Return current adaptive threshold state."""
+    return jsonify(anomaly_detector.get_adaptive_status())
+
+
 # ── Model Training ───────────────────────────────────────────────────────────
 
 trainer = ModelTrainer()

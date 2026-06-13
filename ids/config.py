@@ -49,7 +49,8 @@ TARGET_LATENCY_MS = float(os.getenv("TARGET_LATENCY_MS", "10.0"))
 # ─── Model Parameters ────────────────────────────────────────────────────────
 
 # Feature vector size for BSM input
-BSM_FEATURE_DIM = 10
+# 10 original BSM fields + 5 engineered kinematic/spatial features (matches notebook)
+BSM_FEATURE_DIM = 15
 
 # LSTM sequence window (number of consecutive BSMs)
 LSTM_WINDOW_SIZE = int(os.getenv("LSTM_WINDOW_SIZE", "20"))

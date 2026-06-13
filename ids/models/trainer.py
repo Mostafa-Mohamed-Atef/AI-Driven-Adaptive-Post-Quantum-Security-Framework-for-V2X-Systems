@@ -163,6 +163,51 @@ class ModelTrainer:
 
         return results
 
+    def fine_tune(self, features: np.ndarray, label: int) -> dict:
+        """
+        Incrementally update both models on a single confirmed sample.
+
+        Called by the /api/ids/adapt endpoint when the Misbehavior Authority
+        confirms (label=1) or rejects (label=0) an IDS alert.  Uses a very
+        small learning rate so the models improve without catastrophic forgetting.
+        """
+        results = {}
+        FINE_TUNE_LR = 1e-5
+
+        try:
+            import tensorflow as tf
+            from tensorflow import keras
+
+            X_cnn = features.reshape(1, -1, 1).astype(np.float32)
+            y     = np.array([label], dtype=np.float32)
+
+            # CNN fine-tune
+            if self.cnn_model._trained and self.cnn_model._use_tf:
+                self.cnn_model.model.optimizer.learning_rate = FINE_TUNE_LR
+                loss = self.cnn_model.model.train_on_batch(X_cnn, y)
+                results["cnn_loss"] = float(loss[0]) if isinstance(loss, (list, tuple)) else float(loss)
+
+            # LSTM fine-tune: build a single-step sequence by repeating the feature vector
+            if self.lstm_model._trained and self.lstm_model._use_tf:
+                from ids.config import LSTM_WINDOW_SIZE
+                X_seq = np.tile(features, (LSTM_WINDOW_SIZE, 1))[np.newaxis].astype(np.float32)
+                self.lstm_model.model.optimizer.learning_rate = FINE_TUNE_LR
+                loss = self.lstm_model.model.train_on_batch(X_seq, y)
+                results["lstm_loss"] = float(loss[0]) if isinstance(loss, (list, tuple)) else float(loss)
+
+            results["label"]  = label
+            results["status"] = "fine-tuned"
+            logger.info("Fine-tuned on confirmed label=%d — CNN loss=%s LSTM loss=%s",
+                        label,
+                        results.get("cnn_loss", "n/a"),
+                        results.get("lstm_loss", "n/a"))
+        except Exception as exc:
+            logger.warning("Fine-tune failed: %s", exc)
+            results["status"] = "failed"
+            results["error"]  = str(exc)
+
+        return results
+
     def load_pretrained(self) -> bool:
         """
         Attempt to load pre-trained models from disk.

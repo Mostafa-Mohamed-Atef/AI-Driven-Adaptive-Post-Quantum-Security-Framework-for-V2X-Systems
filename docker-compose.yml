@@ -35,7 +35,7 @@ services:
     environment:
       - ICA_URL=http://intermediate-ca:5002
     ports:
-      - "5005:5005"  # Changed to 5005 to avoid conflict
+      - "5006:5006"   # 5005 reserved for vehicle broadcast
 
   linkage-auth-1:
     build: .
@@ -75,6 +75,8 @@ services:
     depends_on:
       - ra
       - pca
+    environment:
+      - IDS_URL=http://ids-service:5010
     ports:
       - "5004:5004"
 
@@ -85,7 +87,7 @@ services:
       dockerfile: ids/Dockerfile
     volumes:
       - ./ids:/app/ids
-      - ids_models:/app/ids/models/saved
+      - ./ids/models/saved:/app/ids/models/saved   # bind mount — Colab models go here
     depends_on:
       - ma
       - redis
@@ -117,6 +119,8 @@ services:
       - MA_URL=http://ma:5004
       - IDS_HOST=ids-service
       - IDS_PORT=5011
+      - DASHBOARD_HOST=dashboard
+      - DASHBOARD_PORT=5008
 
   vehicle-2:
     build: .
@@ -131,6 +135,8 @@ services:
     environment:
       - IDS_HOST=ids-service
       - IDS_PORT=5011
+      - DASHBOARD_HOST=dashboard
+      - DASHBOARD_PORT=5008
 
   rse-1:
     build: .
@@ -169,6 +175,7 @@ services:
       - ./dashboard:/app/dashboard
     ports:
       - "9001:8000"
+      - "5008:5008"   # UDP port for vehicle messages
     depends_on:
       - vehicle-1
       - vehicle-2
@@ -176,5 +183,3 @@ services:
 
 volumes:
   postgres_data:
-  ids_models:
-

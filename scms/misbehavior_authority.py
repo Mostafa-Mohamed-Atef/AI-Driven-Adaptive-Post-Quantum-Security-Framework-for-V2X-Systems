@@ -5,13 +5,17 @@ Detects and revokes misbehaving vehicles.
 Enhanced with IDS integration for AI-driven alert processing.
 """
 
+import os
 import logging
+import requests as req
 from datetime import datetime
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+IDS_URL = os.getenv("IDS_URL", "http://ids-service:5010")
 
 # Simulated Certificate Revocation List (CRL)
 crl = []
@@ -67,13 +71,11 @@ def report_misbehavior():
     crl.append(revocation_entry)
     
     logger.warning(f"Revoked certificate {certificate_id} for reason: {reason}")
-    
-    # Notify PCA and RA
-    import requests
+
     try:
-        requests.post("http://pca:5005/revoke_certificate", 
-                     json={"certificate_id": certificate_id}, timeout=2)
-    except:
+        req.post("http://pca:5006/revoke_certificate",
+                 json={"certificate_id": certificate_id}, timeout=2)
+    except Exception:
         pass
     
     return jsonify({
@@ -113,7 +115,7 @@ def receive_ids_alert():
         alert.get("description", "")[:80],
     )
 
-    # Auto-revoke on critical severity
+    # Auto-revoke on critical severity and send confirmed label back to IDS
     if severity == "critical":
         cert_id = f"cert_{vehicle_id}"
         if not any(e["certificate_id"] == cert_id for e in crl):
@@ -129,6 +131,28 @@ def receive_ids_alert():
                 "AUTO-REVOKED certificate %s due to IDS %s alert",
                 cert_id, attack_type,
             )
+
+        # Feed confirmed attack back to IDS for adaptive fine-tuning
+        try:
+            req.post(
+                f"{IDS_URL}/api/ids/adapt",
+                json={"vehicle_id": vehicle_id, "label": 1},
+                timeout=2,
+            )
+            logger.info("Sent confirmed attack label to IDS for fine-tuning (vehicle=%s)", vehicle_id)
+        except Exception as exc:
+            logger.debug("Could not notify IDS for fine-tuning: %s", exc)
+
+    elif severity in ("high", "medium"):
+        # High/medium alerts confirmed — still fine-tune but don't revoke
+        try:
+            req.post(
+                f"{IDS_URL}/api/ids/adapt",
+                json={"vehicle_id": vehicle_id, "label": 1},
+                timeout=2,
+            )
+        except Exception:
+            pass
 
     return jsonify({"status": "received", "alert_id": ids_stats["total_ids_alerts"]}), 200
 

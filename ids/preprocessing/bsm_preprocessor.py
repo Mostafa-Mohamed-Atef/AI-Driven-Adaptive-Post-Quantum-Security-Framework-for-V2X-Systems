@@ -1,10 +1,24 @@
 """
-BSM Preprocessor — Cleaning, normalization, and feature extraction.
+BSM Preprocessor — Cleaning, normalization, and 15-feature extraction.
 
-Converts raw BSM/CAM/DENM JSON messages into a normalized feature vector
-suitable for the CNN and LSTM detection models.  Applies noise reduction
-(up to 30% as per the reference paper) via outlier clamping and
-z-score normalization.
+Extracts the same 15 features used during Colab training so the loaded
+Keras models receive correctly-shaped, correctly-scaled input:
+
+  [0]  pos_x              longitude (degrees)
+  [1]  pos_y              latitude  (degrees)
+  [2]  spd                reported speed (m/s)
+  [3]  hed                reported heading (radians)
+  [4]  acl                reported acceleration (m/s²)
+  [5]  inter_msg_gap      seconds since previous message from this vehicle
+  [6]  pos_noise_mag      kinematic position error magnitude (m)  ← best proxy
+  [7]  spd_noise          |position-implied speed − reported speed| (m/s)
+  [8]  hed_noise          angular error between movement direction and heading (rad)
+  [9]  acl_noise          |speed-delta acceleration − reported acl| (m/s²)
+  [10] kinematic_error    same as pos_noise_mag (duplicate for model compatibility)
+  [11] speed_consistency  same as spd_noise
+  [12] heading_consistency same as hed_noise
+  [13] accel_consistency  same as acl_noise
+  [14] spatial_density    distinct vehicles per 100 m grid cell per 1-s bin
 """
 
 import time
@@ -15,116 +29,91 @@ from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
+_TWO_PI = 2.0 * math.pi
+_DEG_PER_METER_LAT = 1.0 / 111_320.0   # degrees latitude per metre
+_GRID_SIZE_M = 100.0                     # spatial density grid resolution
+_DENSITY_BIN_S = 1.0                     # time bin size (seconds)
+
 
 class BSMPreprocessor:
-    """Cleans, normalises, and extracts features from raw V2X messages."""
+    """Cleans, normalises, and extracts 15 features from raw V2X messages."""
 
-    # ── Expected ranges for sanity clamping ──────────────────────────────────
     VALID_RANGES = {
-        "latitude":     (-90.0, 90.0),
-        "longitude":    (-180.0, 180.0),
-        "speed":        (0.0, 250.0),       # km/h
-        "heading":      (0.0, 360.0),
-        "acceleration": (-15.0, 15.0),      # m/s²
+        "speed":        (0.0, 80.0),        # m/s  (~288 km/h max)
+        "heading":      (-math.pi, math.pi), # radians
+        "acceleration": (-15.0, 15.0),       # m/s²
     }
 
     def __init__(self):
-        # Optional fitted StandardScaler (set after model training).
-        # When present it is used instead of Welford's online normalization
-        # so inference matches the training distribution exactly.
         self._scaler = None
 
-        # Welford's online statistics (fallback when scaler not yet available)
-        self._means = np.zeros(10)
-        self._vars = np.ones(10)
+        # Welford online stats — fallback when scaler not loaded yet
+        self._means = np.zeros(15, dtype=np.float32)
+        self._vars  = np.ones(15,  dtype=np.float32)
         self._count = 0
 
-        # Per-vehicle history for temporal feature derivation
+        # Per-vehicle message history (for temporal features)
         self._vehicle_history: dict[str, list[dict]] = defaultdict(list)
-        self._max_history = 50  # keep last N messages per vehicle
+        self._max_history = 50
+
+        # Global position registry for spatial density:
+        # {(time_bin, grid_x, grid_y): set of sender_ids}
+        self._spatial_registry: dict[tuple, set] = defaultdict(set)
+        self._registry_bins: list[int] = []   # sorted list of active bins
+        self._max_registry_bins = 30          # keep last 30 seconds of bins
 
     # ── Public API ───────────────────────────────────────────────────────────
 
     def preprocess(self, raw_msg: dict) -> dict | None:
-        """
-        Full pipeline: validate → clean → extract features → normalize.
-
-        Returns a dict with keys:
-            vehicle_id, timestamp, features (np.ndarray of shape (10,)),
-            raw_data (cleaned dict), attack_surface (metadata hints).
-        Returns *None* when the message cannot be processed.
-        """
-        # 1. Parse & flatten
         parsed = self._parse_message(raw_msg)
         if parsed is None:
             return None
 
-        # 2. Sanity-clamp numeric fields (reduces noise ~30 %)
         cleaned = self._clamp_fields(parsed)
-
-        # 3. Store in vehicle history for temporal features
         vid = cleaned["vehicle_id"]
+
         self._vehicle_history[vid].append(cleaned)
         if len(self._vehicle_history[vid]) > self._max_history:
             self._vehicle_history[vid].pop(0)
 
-        # 4. Extract feature vector
+        self._register_position(vid, cleaned)
+
         features = self._extract_features(cleaned, vid)
-
-        # 5. Normalize
         features = self._normalize(features)
-
-        # Cache normalized features so get_vehicle_sequence doesn't re-normalize
         self._vehicle_history[vid][-1]["_normalized_features"] = features
 
         return {
-            "vehicle_id": vid,
-            "timestamp": cleaned["timestamp"],
-            "features": features,
-            "raw_data": cleaned,
+            "vehicle_id":   vid,
+            "timestamp":    cleaned["timestamp"],
+            "features":     features,
+            "raw_data":     cleaned,
             "attack_surface": self._attack_surface_hints(cleaned, vid),
         }
 
     def set_scaler(self, scaler) -> None:
-        """Inject the StandardScaler fitted during model training."""
         self._scaler = scaler
 
     def preprocess_batch(self, messages: list[dict]) -> list[dict]:
-        """Process a list of raw messages, returning successfully processed ones."""
-        results = []
-        for msg in messages:
-            out = self.preprocess(msg)
-            if out is not None:
-                results.append(out)
-        return results
+        return [r for m in messages for r in [self.preprocess(m)] if r is not None]
 
     def get_vehicle_sequence(self, vehicle_id: str, window: int = 20) -> np.ndarray | None:
-        """
-        Return the last *window* normalized feature vectors for a vehicle
-        as a 2-D array (window, 10).  Used by the LSTM models.
-        Returns None if insufficient history.
-        """
         history = self._vehicle_history.get(vehicle_id, [])
         if len(history) < window:
             return None
-
-        recent = history[-window:]
-        vectors = [e["_normalized_features"] for e in recent
-                   if "_normalized_features" in e]
+        vectors = [
+            e["_normalized_features"]
+            for e in history[-window:]
+            if "_normalized_features" in e
+        ]
         if len(vectors) < window:
             return None
-        return np.array(vectors)
+        return np.array(vectors, dtype=np.float32)  # (window, 15)
 
     # ── Internal helpers ─────────────────────────────────────────────────────
 
     def _parse_message(self, raw: dict) -> dict | None:
-        """Flatten the nested BSM format produced by vehicles."""
         try:
-            # Handle nested {'data': {...}, 'signature': ..., 'crypto': ...}
-            if "data" in raw and isinstance(raw["data"], dict):
-                payload = raw["data"]
-            else:
-                payload = raw
+            payload = raw["data"] if ("data" in raw and isinstance(raw["data"], dict)) else raw
 
             position = payload.get("position", [0.0, 0.0])
             if isinstance(position, list) and len(position) >= 2:
@@ -132,24 +121,33 @@ class BSMPreprocessor:
             else:
                 lat, lon = 0.0, 0.0
 
+            # Accept speed in m/s; if clearly in km/h (>80) convert down
+            spd_raw = float(payload.get("speed", 0.0))
+            if spd_raw > 80.0:
+                spd_raw = spd_raw / 3.6
+
+            # Heading: accept degrees or radians.
+            # Values > 2π suggest degrees → convert.
+            hed_raw = float(payload.get("heading", 0.0))
+            if abs(hed_raw) > _TWO_PI:
+                hed_raw = math.radians(hed_raw)
+
             return {
-                "vehicle_id": str(payload.get("vehicle_id", raw.get("vehicle_id", "unknown"))),
-                "message_type": payload.get("message_type", payload.get("type", "UNKNOWN")),
-                "timestamp": float(payload.get("timestamp", time.time())),
-                "latitude": lat,
-                "longitude": lon,
-                "speed": float(payload.get("speed", 0.0)),
-                "heading": float(payload.get("heading", 0.0)),
+                "vehicle_id":   str(payload.get("vehicle_id", raw.get("vehicle_id", "unknown"))),
+                "message_type": payload.get("message_type", "UNKNOWN"),
+                "timestamp":    float(payload.get("timestamp", time.time())),
+                "latitude":     lat,
+                "longitude":    lon,
+                "speed":        spd_raw,
+                "heading":      hed_raw,
                 "acceleration": float(payload.get("acceleration", 0.0)),
-                "crypto_type": payload.get("crypto_type", raw.get("crypto", "unknown")),
-                "signature": raw.get("signature", ""),
+                "signature":    raw.get("signature", ""),
             }
         except (ValueError, TypeError, KeyError) as exc:
             logger.warning("Failed to parse BSM: %s", exc)
             return None
 
     def _clamp_fields(self, parsed: dict) -> dict:
-        """Clamp numeric fields to valid physical ranges (noise reduction)."""
         for field, (lo, hi) in self.VALID_RANGES.items():
             if field in parsed:
                 parsed[field] = max(lo, min(hi, parsed[field]))
@@ -157,101 +155,130 @@ class BSMPreprocessor:
 
     def _extract_features(self, cleaned: dict, vehicle_id: str) -> np.ndarray:
         """
-        Build a 10-dimensional feature vector:
-          [0] latitude
-          [1] longitude
-          [2] speed
-          [3] heading
-          [4] acceleration
-          [5] message_frequency    (msgs/sec in last 10 s)
-          [6] inter_message_gap    (seconds since previous msg)
-          [7] position_delta       (meters from previous position)
-          [8] speed_consistency    (|actual_speed − inferred_speed|)
-          [9] heading_consistency  (|heading_change − expected_change|)
+        Build a 15-dimensional feature vector matching the Colab training order.
+        Features 6-9 (noise proxies) and 10-13 (kinematic consistency) are
+        computed from trajectory physics — the best available approximation of
+        the VeReMi ground-truth noise labels.
         """
         history = self._vehicle_history.get(vehicle_id, [])
-        prev = history[-2] if len(history) >= 2 else None
+        prev    = history[-2] if len(history) >= 2 else None
 
-        # Basic kinematic features
-        lat = cleaned["latitude"]
         lon = cleaned["longitude"]
-        spd = cleaned["speed"]
-        hdg = cleaned["heading"]
-        acc = cleaned["acceleration"]
+        lat = cleaned["latitude"]
+        spd = cleaned["speed"]        # m/s
+        hed = cleaned["heading"]      # radians
+        acl = cleaned["acceleration"] # m/s²
 
-        # Derived temporal features
         if prev is not None:
-            dt = max(cleaned["timestamp"] - prev["timestamp"], 0.001)
-            gap = dt
-            pos_delta = self._haversine(
-                prev["latitude"], prev["longitude"], lat, lon
-            )
-            inferred_speed = (pos_delta / dt) * 3.6  # m/s → km/h
-            speed_consistency = abs(spd - inferred_speed)
-            heading_change = abs(hdg - prev["heading"])
-            if heading_change > 180:
-                heading_change = 360 - heading_change
-            expected_heading_change = 0.0 if spd < 1 else heading_change
-            heading_consistency = abs(heading_change - expected_heading_change)
-        else:
-            gap = 0.0
-            pos_delta = 0.0
-            speed_consistency = 0.0
-            heading_consistency = 0.0
+            dt = max(cleaned["timestamp"] - prev["timestamp"], 0.05)
 
-        # Message frequency in the last 10 seconds
-        now = cleaned["timestamp"]
-        recent = [
-            m for m in history
-            if now - m["timestamp"] <= 10.0
-        ]
-        msg_freq = len(recent) / 10.0
+            # Displacement in metres (flat-earth approximation)
+            cos_lat = math.cos(math.radians((lat + prev["latitude"]) / 2.0))
+            dx_m = (lon - prev["longitude"]) * 111_320.0 * cos_lat
+            dy_m = (lat - prev["latitude"])  * 111_320.0
+            dist_m = math.sqrt(dx_m * dx_m + dy_m * dy_m)
+
+            # Kinematic prediction from previous state
+            prev_spd = prev["speed"]
+            prev_hed = prev["heading"]
+            exp_dx = prev_spd * math.cos(prev_hed) * dt
+            exp_dy = prev_spd * math.sin(prev_hed) * dt
+            kinematic_err = math.sqrt((dx_m - exp_dx) ** 2 + (dy_m - exp_dy) ** 2)
+
+            # Speed implied by position change vs reported speed
+            pos_spd = dist_m / dt
+            spd_err = abs(pos_spd - spd)
+
+            # Heading implied by movement vs reported heading
+            if dist_m > 0.1:
+                move_hed  = math.atan2(dy_m, dx_m)
+                raw_diff  = abs(move_hed - hed) % _TWO_PI
+                hed_err   = min(raw_diff, _TWO_PI - raw_diff)
+            else:
+                hed_err = 0.0
+
+            # Acceleration from speed change vs reported acl
+            acl_err = abs((spd - prev_spd) / dt - acl)
+
+            inter_msg_gap = dt
+
+        else:
+            kinematic_err  = 0.0
+            spd_err        = 0.0
+            hed_err        = 0.0
+            acl_err        = 0.0
+            inter_msg_gap  = 0.0
+
+        spatial_density = self._spatial_density(lat, lon, cleaned["timestamp"])
 
         return np.array([
-            lat, lon, spd, hdg, acc,
-            msg_freq, gap, pos_delta,
-            speed_consistency, heading_consistency,
+            # ── Original 10 BSM fields (notebook columns 0-9) ──────────────
+            lon,            # pos_x
+            lat,            # pos_y
+            spd,            # spd
+            hed,            # hed
+            acl,            # acl
+            inter_msg_gap,  # inter_msg_gap
+            kinematic_err,  # pos_noise_mag  (ground-truth proxy)
+            spd_err,        # spd_noise      (ground-truth proxy)
+            hed_err,        # hed_noise      (ground-truth proxy)
+            acl_err,        # acl_noise      (ground-truth proxy)
+            # ── 5 engineered kinematic/spatial features (columns 10-14) ────
+            kinematic_err,  # kinematic_error
+            spd_err,        # speed_consistency
+            hed_err,        # heading_consistency
+            acl_err,        # accel_consistency
+            spatial_density,# spatial_density
         ], dtype=np.float32)
 
+    def _register_position(self, vehicle_id: str, cleaned: dict) -> None:
+        t_bin = int(cleaned["timestamp"] / _DENSITY_BIN_S)
+        gx    = int(cleaned["longitude"] * 111_320.0 / _GRID_SIZE_M)
+        gy    = int(cleaned["latitude"]  * 111_320.0 / _GRID_SIZE_M)
+        key   = (t_bin, gx, gy)
+        self._spatial_registry[key].add(vehicle_id)
+
+        if t_bin not in self._registry_bins:
+            self._registry_bins.append(t_bin)
+            self._registry_bins.sort()
+            # Evict old bins
+            cutoff = t_bin - self._max_registry_bins
+            old = [b for b in self._registry_bins if b < cutoff]
+            for b in old:
+                self._registry_bins.remove(b)
+                for k in [k for k in self._spatial_registry if k[0] == b]:
+                    del self._spatial_registry[k]
+
+    def _spatial_density(self, lat: float, lon: float, ts: float) -> float:
+        t_bin = int(ts / _DENSITY_BIN_S)
+        gx    = int(lon * 111_320.0 / _GRID_SIZE_M)
+        gy    = int(lat * 111_320.0 / _GRID_SIZE_M)
+        return float(len(self._spatial_registry.get((t_bin, gx, gy), set())))
+
     def _normalize(self, features: np.ndarray) -> np.ndarray:
-        """Normalize using the training scaler when available, else Welford's."""
         if self._scaler is not None:
-            return self._scaler.transform(features.reshape(1, -1))[0].astype(np.float32)
+            try:
+                return self._scaler.transform(features.reshape(1, -1))[0].astype(np.float32)
+            except Exception as exc:
+                logger.warning("Scaler transform failed: %s — using Welford fallback", exc)
 
-        # Welford's online z-score (fallback before first model training)
+        # Welford online z-score (active before scaler is loaded)
         self._count += 1
-        delta = features - self._means
+        delta        = features - self._means
         self._means += delta / self._count
-        delta2 = features - self._means
-        self._vars += (delta * delta2 - self._vars) / self._count
-        std = np.sqrt(np.maximum(self._vars, 1e-8))
-        return (features - self._means) / std
-
-    @staticmethod
-    def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-        """Great-circle distance between two points in **meters**."""
-        R = 6_371_000  # Earth radius in meters
-        phi1, phi2 = math.radians(lat1), math.radians(lat2)
-        dphi = math.radians(lat2 - lat1)
-        dlam = math.radians(lon2 - lon1)
-        a = (
-            math.sin(dphi / 2) ** 2
-            + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
-        )
-        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        delta2       = features - self._means
+        self._vars  += (delta * delta2 - self._vars) / self._count
+        std          = np.sqrt(np.maximum(self._vars, 1e-8))
+        return ((features - self._means) / std).astype(np.float32)
 
     def _attack_surface_hints(self, cleaned: dict, vid: str) -> dict:
-        """Quick heuristic flags for downstream detectors."""
-        hints = {}
+        hints   = {}
         history = self._vehicle_history.get(vid, [])
 
-        # Replay hint: duplicate signature
-        if len(history) >= 2:
-            if cleaned["signature"] == history[-2].get("signature", ""):
-                hints["possible_replay"] = True
+        if len(history) >= 2 and cleaned["signature"] == history[-2].get("signature", ""):
+            hints["possible_replay"] = True
 
-        # DoS hint: very high frequency
-        now = cleaned["timestamp"]
+        now    = cleaned["timestamp"]
         recent = [m for m in history if now - m["timestamp"] <= 1.0]
         if len(recent) > 10:
             hints["possible_dos"] = True
