@@ -253,6 +253,9 @@ def _train_models():
         lstm_model=trainer.lstm_model,
     )
     fdi_detector.set_lstm_model(trainer.lstm_model)
+    if trainer.scaler is not None:
+        preprocessor.set_scaler(trainer.scaler)
+        logger.info("Feature scaler injected into preprocessor")
     stats["models_trained"] = True
     logger.info("Models trained and injected into detectors")
 
@@ -271,6 +274,9 @@ if __name__ == "__main__":
             lstm_model=trainer.lstm_model,
         )
         fdi_detector.set_lstm_model(trainer.lstm_model)
+        if trainer.scaler is not None:
+            preprocessor.set_scaler(trainer.scaler)
+            logger.info("Feature scaler loaded and injected into preprocessor")
         stats["models_trained"] = True
         logger.info("Pre-trained models loaded")
     else:

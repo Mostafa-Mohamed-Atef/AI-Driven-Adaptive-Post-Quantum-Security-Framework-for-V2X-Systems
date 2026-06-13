@@ -162,8 +162,9 @@ class LSTMModel:
         """Persist model to disk."""
         os.makedirs(os.path.dirname(path), exist_ok=True)
         if self._use_tf:
-            self.model.save(path)
-            logger.info("LSTM model saved to %s", path)
+            keras_path = path + ".keras"
+            self.model.save(keras_path)
+            logger.info("LSTM model saved to %s", keras_path)
         elif SKLEARN_AVAILABLE:
             import joblib
             joblib.dump(self.model, path + ".pkl")
@@ -171,10 +172,11 @@ class LSTMModel:
     def load(self, path: str):
         """Load model from disk."""
         try:
-            if self._use_tf and os.path.exists(path):
-                self.model = keras.models.load_model(path)
+            keras_path = path + ".keras"
+            if self._use_tf and os.path.exists(keras_path):
+                self.model = keras.models.load_model(keras_path)
                 self._trained = True
-                logger.info("LSTM model loaded from %s", path)
+                logger.info("LSTM model loaded from %s", keras_path)
             elif SKLEARN_AVAILABLE and os.path.exists(path + ".pkl"):
                 import joblib
                 self.model = joblib.load(path + ".pkl")

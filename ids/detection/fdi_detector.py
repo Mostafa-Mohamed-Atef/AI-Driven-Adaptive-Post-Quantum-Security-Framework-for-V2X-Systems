@@ -72,6 +72,7 @@ class FDIDetector:
             "heading": raw.get("heading", 0.0),
             "acceleration": raw.get("acceleration", 0.0),
             "timestamp": processed_msg["timestamp"],
+            "features": processed_msg.get("features"),  # full 10-dim normalized vector
         }
         self._trajectories[vid].append(state)
         if len(self._trajectories[vid]) > self._max_trajectory:
@@ -177,15 +178,16 @@ class FDIDetector:
             if len(trajectory) < LSTM_WINDOW_SIZE:
                 return None
 
-            # Build input sequence from trajectory
+            # Use the cached 10-dim normalized feature vectors stored during
+            # preprocessing so the shape matches the trained LSTM (window, 10).
             recent = trajectory[-LSTM_WINDOW_SIZE:]
-            sequence = np.array([
-                [s["lat"], s["lon"], s["speed"], s["heading"], s["acceleration"]]
-                for s in recent
-            ], dtype=np.float32)
+            feat_list = [s["features"] for s in recent if s.get("features") is not None]
+            if len(feat_list) < LSTM_WINDOW_SIZE:
+                return None
+            sequence = np.array(feat_list, dtype=np.float32)
 
-            # Reshape for LSTM: (1, window_size, features)
-            X = sequence.reshape(1, LSTM_WINDOW_SIZE, 5)
+            # Reshape for LSTM: (1, window_size, feature_dim)
+            X = sequence.reshape(1, LSTM_WINDOW_SIZE, sequence.shape[1])
 
             # Predict anomaly score
             score = self._lstm_model.predict_anomaly_score(X)

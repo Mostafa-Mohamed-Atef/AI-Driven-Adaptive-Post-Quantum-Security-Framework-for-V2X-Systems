@@ -29,7 +29,12 @@ class BSMPreprocessor:
     }
 
     def __init__(self):
-        # Running statistics for z-score normalization (online Welford)
+        # Optional fitted StandardScaler (set after model training).
+        # When present it is used instead of Welford's online normalization
+        # so inference matches the training distribution exactly.
+        self._scaler = None
+
+        # Welford's online statistics (fallback when scaler not yet available)
         self._means = np.zeros(10)
         self._vars = np.ones(10)
         self._count = 0
@@ -66,8 +71,11 @@ class BSMPreprocessor:
         # 4. Extract feature vector
         features = self._extract_features(cleaned, vid)
 
-        # 5. Online z-score normalization
+        # 5. Normalize
         features = self._normalize(features)
+
+        # Cache normalized features so get_vehicle_sequence doesn't re-normalize
+        self._vehicle_history[vid][-1]["_normalized_features"] = features
 
         return {
             "vehicle_id": vid,
@@ -76,6 +84,10 @@ class BSMPreprocessor:
             "raw_data": cleaned,
             "attack_surface": self._attack_surface_hints(cleaned, vid),
         }
+
+    def set_scaler(self, scaler) -> None:
+        """Inject the StandardScaler fitted during model training."""
+        self._scaler = scaler
 
     def preprocess_batch(self, messages: list[dict]) -> list[dict]:
         """Process a list of raw messages, returning successfully processed ones."""
@@ -88,7 +100,7 @@ class BSMPreprocessor:
 
     def get_vehicle_sequence(self, vehicle_id: str, window: int = 20) -> np.ndarray | None:
         """
-        Return the last *window* preprocessed feature vectors for a vehicle
+        Return the last *window* normalized feature vectors for a vehicle
         as a 2-D array (window, 10).  Used by the LSTM models.
         Returns None if insufficient history.
         """
@@ -97,11 +109,10 @@ class BSMPreprocessor:
             return None
 
         recent = history[-window:]
-        vectors = []
-        for entry in recent:
-            feat = self._extract_features(entry, vehicle_id)
-            feat = self._normalize(feat)
-            vectors.append(feat)
+        vectors = [e["_normalized_features"] for e in recent
+                   if "_normalized_features" in e]
+        if len(vectors) < window:
+            return None
         return np.array(vectors)
 
     # ── Internal helpers ─────────────────────────────────────────────────────
@@ -203,13 +214,16 @@ class BSMPreprocessor:
         ], dtype=np.float32)
 
     def _normalize(self, features: np.ndarray) -> np.ndarray:
-        """Online z-score normalization (Welford's method)."""
+        """Normalize using the training scaler when available, else Welford's."""
+        if self._scaler is not None:
+            return self._scaler.transform(features.reshape(1, -1))[0].astype(np.float32)
+
+        # Welford's online z-score (fallback before first model training)
         self._count += 1
         delta = features - self._means
         self._means += delta / self._count
         delta2 = features - self._means
         self._vars += (delta * delta2 - self._vars) / self._count
-
         std = np.sqrt(np.maximum(self._vars, 1e-8))
         return (features - self._means) / std
 

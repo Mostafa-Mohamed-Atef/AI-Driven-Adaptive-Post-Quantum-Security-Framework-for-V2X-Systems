@@ -62,6 +62,8 @@ def main():
     parser.add_argument("--output-dir", default=MODEL_SAVE_DIR)
     parser.add_argument("--evaluate", action="store_true",
                         help="Show detailed evaluation after training")
+    parser.add_argument("--nrows", type=int, default=None,
+                        help="Limit rows loaded (useful for large files, e.g. --nrows 500000)")
     args = parser.parse_args()
 
     # ── Load Data ────────────────────────────────────────────────────────
@@ -80,11 +82,12 @@ def main():
             sys.exit(1)
 
         if args.dataset == "veremi":
-            data = loader.load_veremi(args.path)
+            data = loader.load_veremi(args.path, nrows=args.nrows)
         elif args.dataset == "ciciv":
-            data = loader.load_ciciv(args.path)
+            data = loader.load_ciciv(args.path, nrows=args.nrows)
         else:
-            data = loader.load_csv(args.path, label_column=args.label_col)
+            data = loader.load_csv(args.path, label_column=args.label_col,
+                                   nrows=args.nrows)
 
         cnn_data = data
 
@@ -136,6 +139,14 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     cnn.save(os.path.join(args.output_dir, "cnn_model"))
     lstm.save(os.path.join(args.output_dir, "lstm_model"))
+
+    # Persist the fitted scaler so the service uses the same normalization
+    if args.dataset != "synthetic" and hasattr(loader, "scaler"):
+        import joblib
+        joblib.dump(loader.scaler,
+                    os.path.join(args.output_dir, "feature_scaler.pkl"))
+        logger.info("Feature scaler saved to %s", args.output_dir)
+
     logger.info("Models saved to %s", args.output_dir)
 
     # ── Evaluate ─────────────────────────────────────────────────────────

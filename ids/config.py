@@ -64,7 +64,11 @@ TRAINING_BATCH_SIZE = int(os.getenv("TRAINING_BATCH_SIZE", "64"))
 LEARNING_RATE = float(os.getenv("LEARNING_RATE", "0.001"))
 
 # Model persistence
-MODEL_SAVE_DIR = os.getenv("MODEL_SAVE_DIR", "/app/ids/models/saved")
+_IDS_ROOT = os.path.dirname(os.path.abspath(__file__))
+MODEL_SAVE_DIR = os.getenv(
+    "MODEL_SAVE_DIR",
+    os.path.join(_IDS_ROOT, "models", "saved"),
+)
 
 # K-Means parameters for Sybil detection
 KMEANS_N_CLUSTERS = int(os.getenv("KMEANS_N_CLUSTERS", "5"))

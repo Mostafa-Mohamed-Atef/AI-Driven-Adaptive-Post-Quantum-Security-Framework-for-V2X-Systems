@@ -14,6 +14,7 @@ Attack types generated:
 import logging
 import numpy as np
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 
 from ids.config import (
     BSM_FEATURE_DIM,
@@ -56,6 +57,10 @@ class TrainingDataGenerator:
             X, y, test_size=test_size, random_state=42, stratify=y
         )
 
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_test = scaler.transform(X_test)
+
         logger.info(
             "CNN dataset: %d train, %d test, %.1f%% attack",
             len(X_train), len(X_test),
@@ -67,12 +72,14 @@ class TrainingDataGenerator:
             "X_test": X_test.astype(np.float32),
             "y_train": y_train.astype(np.float32),
             "y_test": y_test.astype(np.float32),
+            "scaler": scaler,
         }
 
     def generate_lstm_dataset(self, n_normal: int = 1000,
                               n_attack: int = 200,
                               window_size: int = LSTM_WINDOW_SIZE,
-                              test_size: float = 0.2) -> dict:
+                              test_size: float = 0.2,
+                              scaler: StandardScaler = None) -> dict:
         """
         Generate a dataset for the LSTM model (BSM sequences).
 
@@ -95,6 +102,19 @@ class TrainingDataGenerator:
             X, y, test_size=test_size, random_state=42, stratify=y
         )
 
+        # Normalize using the same scaler as the CNN data so both models
+        # see the same input distribution as runtime inference.
+        n_tr, w, f = X_train.shape
+        n_te = X_test.shape[0]
+        if scaler is None:
+            scaler = StandardScaler()
+            X_train = scaler.fit_transform(
+                X_train.reshape(-1, f)).reshape(n_tr, w, f)
+        else:
+            X_train = scaler.transform(
+                X_train.reshape(-1, f)).reshape(n_tr, w, f)
+        X_test = scaler.transform(X_test.reshape(-1, f)).reshape(n_te, w, f)
+
         logger.info(
             "LSTM dataset: %d train, %d test, shape=%s",
             len(X_train), len(X_test), X_train.shape
@@ -105,6 +125,7 @@ class TrainingDataGenerator:
             "X_test": X_test.astype(np.float32),
             "y_train": y_train.astype(np.float32),
             "y_test": y_test.astype(np.float32),
+            "scaler": scaler,
         }
 
     # ── Normal Data Generation ───────────────────────────────────────────

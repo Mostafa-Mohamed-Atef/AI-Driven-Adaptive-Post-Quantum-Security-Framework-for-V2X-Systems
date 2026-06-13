@@ -40,6 +40,7 @@ class ModelTrainer:
         self.data_generator = TrainingDataGenerator()
         self.evaluator = IDSEvaluator()
         self.training_results = {}
+        self.scaler = None
 
     def train_all(self, n_normal: int = 5000, n_attack: int = 1000) -> dict:
         """
@@ -64,9 +65,11 @@ class ModelTrainer:
         cnn_data = self.data_generator.generate_cnn_dataset(
             n_normal=n_normal, n_attack=n_attack
         )
+        self.scaler = cnn_data.get("scaler")
         lstm_data = self.data_generator.generate_lstm_dataset(
             n_normal=n_normal // 5, n_attack=n_attack // 5,
             window_size=LSTM_WINDOW_SIZE,
+            scaler=self.scaler,
         )
 
         logger.info(
@@ -141,6 +144,11 @@ class ModelTrainer:
         self.cnn_model.save(cnn_path)
         self.lstm_model.save(lstm_path)
 
+        if self.scaler is not None:
+            import joblib
+            joblib.dump(self.scaler, os.path.join(MODEL_SAVE_DIR, "feature_scaler.pkl"))
+            logger.info("Feature scaler saved to %s", MODEL_SAVE_DIR)
+
         elapsed = time.time() - start
         results["total_time_seconds"] = round(elapsed, 2)
         self.training_results = results
@@ -164,12 +172,18 @@ class ModelTrainer:
         cnn_path = os.path.join(MODEL_SAVE_DIR, "cnn_model")
         lstm_path = os.path.join(MODEL_SAVE_DIR, "lstm_model")
 
-        if os.path.exists(cnn_path) or os.path.exists(cnn_path + ".pkl"):
+        if (os.path.exists(cnn_path + ".keras") or os.path.exists(cnn_path + ".pkl")):
             self.cnn_model.load(cnn_path)
             loaded = True
 
-        if os.path.exists(lstm_path) or os.path.exists(lstm_path + ".pkl"):
+        if (os.path.exists(lstm_path + ".keras") or os.path.exists(lstm_path + ".pkl")):
             self.lstm_model.load(lstm_path)
             loaded = True
+
+        scaler_path = os.path.join(MODEL_SAVE_DIR, "feature_scaler.pkl")
+        if os.path.exists(scaler_path):
+            import joblib
+            self.scaler = joblib.load(scaler_path)
+            logger.info("Feature scaler loaded from %s", scaler_path)
 
         return loaded

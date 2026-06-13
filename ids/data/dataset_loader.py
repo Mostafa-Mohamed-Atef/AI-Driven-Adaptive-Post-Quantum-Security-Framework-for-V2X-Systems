@@ -56,7 +56,8 @@ class DatasetLoader:
 
     # ── VeReMi Dataset ────────────────────────────────────────────────────
 
-    def load_veremi(self, csv_path: str, test_size: float = 0.2) -> dict:
+    def load_veremi(self, csv_path: str, test_size: float = 0.2,
+                    nrows: int = None) -> dict:
         """
         Load VeReMi dataset from a preprocessed CSV file.
 
@@ -83,8 +84,8 @@ class DatasetLoader:
         -------
         dict with X_train, X_test, y_train, y_test, attack_map
         """
-        logger.info("Loading VeReMi dataset from %s", csv_path)
-        df = pd.read_csv(csv_path)
+        logger.info("Loading VeReMi dataset from %s (nrows=%s)", csv_path, nrows)
+        df = pd.read_csv(csv_path, nrows=nrows)
         logger.info("VeReMi: %d rows, %d columns", len(df), len(df.columns))
         logger.info("Columns: %s", list(df.columns))
 
@@ -98,9 +99,9 @@ class DatasetLoader:
             16: "eventual_stop",
         }
 
-        # Identify label column
+        # Identify label column — prefer binary `attack` over multi-class `type`
         label_col = None
-        for candidate in ["type", "label", "class", "attack_type", "Label"]:
+        for candidate in ["attack", "label", "Label", "class", "type"]:
             if candidate in df.columns:
                 label_col = candidate
                 break
@@ -145,14 +146,15 @@ class DatasetLoader:
 
     # ── CICIoV2024 Dataset ────────────────────────────────────────────────
 
-    def load_ciciv(self, csv_path: str, test_size: float = 0.2) -> dict:
+    def load_ciciv(self, csv_path: str, test_size: float = 0.2,
+                   nrows: int = None) -> dict:
         """
         Load CICIoV2024 or similar CIC-format dataset.
 
         Returns dict with X_train, X_test, y_train, y_test.
         """
-        logger.info("Loading CICIoV dataset from %s", csv_path)
-        df = pd.read_csv(csv_path)
+        logger.info("Loading CICIoV dataset from %s (nrows=%s)", csv_path, nrows)
+        df = pd.read_csv(csv_path, nrows=nrows)
 
         # Find label column
         label_col = None
@@ -190,7 +192,8 @@ class DatasetLoader:
 
     def load_csv(self, csv_path: str, label_column: str = "label",
                  feature_columns: list = None,
-                 test_size: float = 0.2) -> dict:
+                 test_size: float = 0.2,
+                 nrows: int = None) -> dict:
         """
         Load any CSV dataset with configurable column mapping.
 
@@ -202,8 +205,8 @@ class DatasetLoader:
         feature_columns : list[str], optional
             Specific feature columns to use.  If None, auto-detected.
         """
-        logger.info("Loading generic CSV from %s", csv_path)
-        df = pd.read_csv(csv_path)
+        logger.info("Loading generic CSV from %s (nrows=%s)", csv_path, nrows)
+        df = pd.read_csv(csv_path, nrows=nrows)
 
         if label_column not in df.columns:
             raise ValueError(
@@ -265,11 +268,15 @@ class DatasetLoader:
         """Auto-detect numeric feature columns, excluding IDs and labels."""
         exclude = {
             "type", "label", "class", "attack_type", "Label", "Attack",
+            "attack",  # VeReMi binary label column
             "sender", "receiver", "senderId", "receiverId",
             "vehicle_id", "Vehicle_ID", "id", "ID", "index",
         }
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        feature_cols = [c for c in numeric_cols if c not in exclude]
+        feature_cols = [
+            c for c in numeric_cols
+            if c not in exclude and not c.startswith("Unnamed")
+        ]
         return feature_cols[:BSM_FEATURE_DIM * 2]  # cap at 20 cols max
 
     def _pad_features(self, X: np.ndarray) -> np.ndarray:
